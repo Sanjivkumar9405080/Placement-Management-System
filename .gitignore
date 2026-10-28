@@ -25,6 +25,15 @@ dist-ssr
 node_modules/
 .env
 .env.*
+!.env.example
 dist/
 build/
 .vite/
+.vercel
+
+# Uploaded Files
+Backend/uploads/resumes/*
+!Backend/uploads/resumes/.gitkeep
+Backend/uploads/*
+!Backend/uploads/.gitkeep
+uploads/
