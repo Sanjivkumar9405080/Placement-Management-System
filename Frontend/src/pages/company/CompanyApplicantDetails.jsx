@@ -417,7 +417,7 @@ const CompanyApplicantDetails = () => {
                       href={
                         student.resume.startsWith("http")
                           ? student.resume
-                          : `http://localhost:5000/uploads/${student.resume}`
+                          : `${(import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/api\/?$/, "")}/uploads/${student.resume}`
                       }
                       target="_blank"
                       rel="noopener noreferrer"
