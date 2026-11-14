@@ -9,21 +9,38 @@ const Student = require("../models/Student");
 // Register User
 const register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const {
+      name,
+      email,
+      password,
+      role,
+      companyName,
+      officialEmail,
+      hrName,
+      phone,
+      website,
+      location,
+      description,
+      logo,
+      industry,
+    } = req.body;
 
     // Check required fields
-    if (!name || !email || !password) {
+    if ((!name && !companyName) || !email || !password) {
       return res.status(400).json({
         message: "Please provide name, email and password",
       });
     }
 
+    const effectiveName = (companyName || name).trim();
+    const effectiveEmail = (officialEmail || email).trim().toLowerCase();
+
     // Check existing user
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: effectiveEmail });
 
     if (existingUser) {
       return res.status(400).json({
-        message: "User already exists",
+        message: "User already exists with this email address",
       });
     }
 
@@ -32,40 +49,74 @@ const register = async (req, res) => {
 
     // Create user
     const user = await User.create({
-      name,
-      email,
+      name: effectiveName,
+      email: effectiveEmail,
       password: hashedPassword,
       role: role || "student",
     });
 
-    // If company user, automatically create matching Company profile
+    // If company user, link or create matching Company profile
     if (user.role === "company") {
-      await Company.create({
-        userId: user._id,
-        companyName: name,
-        officialEmail: email,
-        hrName: name,
-        location: "College Campus",
-        isApproved: true,
+      // Check if Admin already created a placeholder Company with this email or name
+      let company = await Company.findOne({
+        $or: [
+          { officialEmail: effectiveEmail },
+          { companyName: effectiveName },
+        ],
       });
+
+      if (company) {
+        // Link user to existing company record created by Admin
+        company.userId = user._id;
+        if (hrName) company.hrName = hrName.trim();
+        if (phone) company.phone = phone.trim();
+        if (website) company.website = website.trim();
+        if (location) company.location = location.trim();
+        if (description) company.description = description.trim();
+        if (logo) company.logo = logo.trim();
+        if (industry) company.industry = industry.trim();
+        company.isApproved = true; // Was initiated by Admin, so mark approved
+        await company.save();
+      } else {
+        // Create new company profile - self registered, requires admin approval
+        company = await Company.create({
+          userId: user._id,
+          companyName: effectiveName,
+          officialEmail: effectiveEmail,
+          hrName: (hrName || name || effectiveName).trim(),
+          phone: phone ? phone.trim() : "",
+          website: website ? website.trim() : "",
+          location: location ? location.trim() : "College Campus",
+          description: description ? description.trim() : "",
+          logo: logo ? logo.trim() : "",
+          industry: industry ? industry.trim() : "Technology",
+          isApproved: false, // Pending admin approval
+          status: "Active",
+        });
+      }
     }
 
     // If student user, automatically create initial Student profile
     if (user.role === "student") {
       await Student.create({
         userId: user._id,
-        phone: "",
+        phone: phone ? phone.trim() : "",
         college: "College of Engineering",
         branch: "CSE - AI & ML",
         course: "B.Tech Computer Science",
+        academicYear: "3rd Year",
         cgpa: 7.0,
         graduationYear: 2027,
+        backlogs: 0,
         skills: ["Full Stack Developer", "React.js", "Node.js", "MongoDB"],
       });
     }
 
     res.status(201).json({
-      message: "User registered successfully",
+      message:
+        user.role === "company"
+          ? "Company registered successfully! Your account has been submitted for placement cell approval."
+          : "User registered successfully",
       user: {
         id: user._id,
         name: user.name,
@@ -115,7 +166,8 @@ const login = async (req, res) => {
       });
     }
 
-    // Check if company account is disabled
+    // Check company status & approval
+    let companyInfo = null;
     if (user.role === "company") {
       const company = await Company.findOne({ userId: user._id });
       if (company && company.status === "Disabled") {
@@ -124,6 +176,7 @@ const login = async (req, res) => {
             "Company account is disabled. Please contact the placement administrator.",
         });
       }
+      companyInfo = company;
     }
 
     // Generate JWT
@@ -146,6 +199,8 @@ const login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        isApproved: companyInfo ? companyInfo.isApproved : true,
+        companyName: companyInfo ? companyInfo.companyName : user.name,
       },
     });
   } catch (error) {

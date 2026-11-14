@@ -33,6 +33,7 @@ export const placementDrivesAPI = {
   create: (driveData) => api.post("/placement-drives", driveData),
   update: (id, driveData) => api.put(`/placement-drives/${id}`, driveData),
   close: (id) => api.put(`/placement-drives/${id}/close`),
+  getStudentOpportunities: () => api.get("/placement-drives/opportunities"),
 };
 
 // Application API helpers
@@ -102,7 +103,18 @@ export const adminAPI = {
   rejectCompany: (id) => api.put(`/admin/companies/${id}/reject`),
   getAdminPlacementDrives: (params) => api.get("/admin/drives", { params }),
   getPlacementDrives: (params) => api.get("/admin/drives", { params }),
+  createPlacementDrive: (driveData) => api.post("/admin/drives", driveData),
   getAdminPlacementDriveDetails: (id) => api.get(`/admin/drives/${id}`),
+  updatePlacementDrive: (id, driveData) =>
+    api.put(`/admin/drives/${id}`, driveData),
+  deletePlacementDrive: (id) => api.delete(`/admin/drives/${id}`),
+  approvePlacementDrive: (id) => api.put(`/admin/drives/${id}/approve`),
+  rejectPlacementDrive: (id, rejectionReason) =>
+    api.put(`/admin/drives/${id}/reject`, { rejectionReason }),
+  requestDriveChanges: (id, changeRequests) =>
+    api.put(`/admin/drives/${id}/request-changes`, { changeRequests }),
+  getDriveEligibleStudents: (id) =>
+    api.get(`/admin/drives/${id}/eligible-students`),
   getAdminDriveApplicants: (id) => api.get(`/admin/drives/${id}/applicants`),
   closeAdminPlacementDrive: (id) => api.put(`/admin/drives/${id}/close`),
   getAdminApplications: (params) => api.get("/admin/applications", { params }),

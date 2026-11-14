@@ -3,6 +3,8 @@ const PlacementDrive = require("../models/PlacementDrive");
 const Student = require("../models/Student");
 const Company = require("../models/Company");
 const User = require("../models/User");
+const Notification = require("../models/Notification");
+const { evaluateStudentEligibility } = require("../utils/eligibilityHelper");
 
 // ==========================================
 // STUDENT - APPLY FOR PLACEMENT DRIVE
@@ -68,8 +70,8 @@ const applyForDrive = async (req, res) => {
       });
     }
 
-    // 3. Verify drive is active
-    if (drive.status !== "Active") {
+    // 3. Verify drive is active / approved
+    if (drive.status !== "Active" && drive.status !== "Approved") {
       return res.status(400).json({
         success: false,
         message: "This placement drive is currently not active or is closed.",
@@ -84,56 +86,13 @@ const applyForDrive = async (req, res) => {
       });
     }
 
-    // 5. Verify student eligibility
-    // A. Minimum CGPA
-    if (
-      drive.eligibility?.minCGPA !== undefined &&
-      drive.eligibility.minCGPA > 0 &&
-      student.cgpa !== undefined &&
-      student.cgpa < drive.eligibility.minCGPA
-    ) {
+    // 5. Strict Smart Eligibility Verification
+    const eligibilityResult = evaluateStudentEligibility(student, drive);
+    if (!eligibilityResult.isEligible) {
       return res.status(400).json({
         success: false,
-        message: `Ineligible: Minimum required CGPA is ${drive.eligibility.minCGPA}, but your CGPA is ${student.cgpa}.`,
-      });
-    }
-
-    // B. Eligible Branches
-    if (
-      drive.eligibility?.branches &&
-      drive.eligibility.branches.length > 0 &&
-      student.branch
-    ) {
-      const sBranch = student.branch.trim().toLowerCase();
-      const isBranchEligible = drive.eligibility.branches.some((b) => {
-        const dBranch = b.trim().toLowerCase();
-        return (
-          dBranch === sBranch ||
-          sBranch.includes(dBranch) ||
-          dBranch.includes(sBranch) ||
-          (dBranch === "cse" && (sBranch.includes("computer") || sBranch.includes("cse"))) ||
-          (sBranch === "cse" && (dBranch.includes("computer") || dBranch.includes("cse")))
-        );
-      });
-      if (!isBranchEligible) {
-        return res.status(400).json({
-          success: false,
-          message: `Ineligible: Drive is restricted to branches: ${drive.eligibility.branches.join(
-            ", "
-          )}. Your branch is ${student.branch}.`,
-        });
-      }
-    }
-
-    // C. Passing / Graduation Year
-    if (
-      drive.eligibility?.passingYear &&
-      student.graduationYear &&
-      student.graduationYear !== drive.eligibility.passingYear
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: `Ineligible: This drive is specifically for the batch of ${drive.eligibility.passingYear}.`,
+        message: `Ineligible: ${eligibilityResult.ineligibilityReason}`,
+        breakdown: eligibilityResult.breakdown,
       });
     }
 
@@ -361,6 +320,43 @@ const updateApplicationStatus = async (req, res) => {
         success: false,
         message: "Application not found or unauthorized.",
       });
+    }
+
+    // Automatically deliver notification to the student
+    try {
+      const studentUserId =
+        application.student?.userId?._id || application.student?.userId;
+      if (studentUserId) {
+        const compName = company.companyName || "Recruiter";
+        const roleName = application.role || "Placement Drive";
+        let notifTitle = `Application Status Update`;
+        let notifMsg = `Your application for "${roleName}" at ${compName} has been updated to "${status}".`;
+
+        if (status === "Shortlisted") {
+          notifTitle = `Shortlisted: ${roleName}! 🎉`;
+          notifMsg = `Congratulations! You have been shortlisted by ${compName} for "${roleName}".`;
+        } else if (status === "Selected") {
+          notifTitle = `Selected: ${roleName}! 🌟`;
+          notifMsg = `Great news! You have been selected for "${roleName}" by ${compName}!`;
+        } else if (status === "Interview") {
+          notifTitle = `Interview Round: ${roleName}`;
+          notifMsg = `You have moved to the interview round for "${roleName}" at ${compName}.`;
+        } else if (status === "Rejected") {
+          notifTitle = `Application Update: ${roleName}`;
+          notifMsg = `Thank you for your interest in "${roleName}" at ${compName}. Your application was not selected at this stage.`;
+        }
+
+        await Notification.create({
+          userId: studentUserId,
+          sender: req.user._id,
+          title: notifTitle,
+          message: notifMsg,
+          type: "application",
+          targetAudience: "individual",
+        });
+      }
+    } catch (notifErr) {
+      console.warn("Error delivering status notification to student:", notifErr);
     }
 
     res.status(200).json({

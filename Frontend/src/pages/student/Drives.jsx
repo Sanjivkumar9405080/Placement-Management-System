@@ -2,7 +2,13 @@ import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Navbar from "../../components/Navbar";
 import { placementDrivesAPI } from "../../services/api";
-import { Loader2 } from "lucide-react";
+import {
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Info,
+  Sparkles,
+} from "lucide-react";
 
 const Drives = () => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -59,8 +65,73 @@ const Drives = () => {
   const fetchActiveDrives = async () => {
     try {
       setLoading(true);
-      const res = await placementDrivesAPI.getActive();
-      if (res.data.success && res.data.drives && res.data.drives.length > 0) {
+      // Try fetching student-tailored opportunities first with smart eligibility
+      let res;
+      let isOpportunitiesFormat = false;
+      try {
+        res = await placementDrivesAPI.getStudentOpportunities();
+        if (res.data?.success && res.data?.opportunities) {
+          isOpportunitiesFormat = true;
+        }
+      } catch (oppErr) {
+        // Fallback to general active drives if not authenticated as student
+        res = await placementDrivesAPI.getActive();
+      }
+
+      if (isOpportunitiesFormat && res.data.opportunities.length > 0) {
+        const formatted = res.data.opportunities.map((d) => {
+          const compName = d.companyName || d.company?.companyName || "TechNova Solutions";
+          const shortName = compName
+            .split(" ")
+            .map((w) => w[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase();
+
+          const roleLower = (d.role || "").toLowerCase();
+          const skillsLower = (d.skills || []).map((s) => s.toLowerCase());
+
+          let cat = "software";
+          if (
+            roleLower.includes("full") ||
+            roleLower.includes("mern") ||
+            skillsLower.some((s) => s.includes("react") && s.includes("node"))
+          ) {
+            cat = "fullstack";
+          } else if (
+            roleLower.includes("front") ||
+            skillsLower.some((s) => s.includes("react") || s.includes("vue") || s.includes("ui"))
+          ) {
+            cat = "frontend";
+          }
+
+          return {
+            id: d._id,
+            company: compName,
+            logo: d.companyLogo || d.company?.logo,
+            shortName,
+            role: d.role,
+            package: d.package,
+            location: d.location || "College Campus",
+            workMode: d.jobType || "On-site",
+            deadline: d.applicationDeadline
+              ? new Date(d.applicationDeadline).toLocaleDateString("en-US", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })
+              : "Ongoing",
+            vacancies: d.vacancies ? `${d.vacancies} Openings` : "Campus Hiring",
+            category: cat,
+            skills: d.skills || [],
+            isEligible: d.isEligible,
+            ineligibilityReason: d.ineligibilityReason,
+            hasApplied: d.hasApplied,
+            applicationStatus: d.applicationStatus,
+          };
+        });
+        setDrivesList(formatted);
+      } else if (res.data?.success && res.data?.drives && res.data.drives.length > 0) {
         const formatted = res.data.drives.map((d) => {
           const compName = d.company?.companyName || "TechNova Solutions";
           const shortName = compName
@@ -73,11 +144,12 @@ const Drives = () => {
           return {
             id: d._id,
             company: compName,
+            logo: d.company?.logo,
             shortName,
             role: d.role,
             package: d.package,
             location: d.location || "College Campus",
-            workMode: "On-site",
+            workMode: d.jobType || "On-site",
             deadline: d.applicationDeadline
               ? new Date(d.applicationDeadline).toLocaleDateString("en-US", {
                   day: "numeric",
@@ -85,7 +157,7 @@ const Drives = () => {
                   year: "numeric",
                 })
               : "Ongoing",
-            vacancies: "Campus Hiring",
+            vacancies: d.vacancies ? `${d.vacancies} Openings` : "Campus Hiring",
             category: "all",
             skills: d.skills || [],
           };
@@ -111,7 +183,11 @@ const Drives = () => {
       );
 
     const matchesFilter =
-      selectedFilter === "all" || drive.category === selectedFilter;
+      selectedFilter === "all"
+        ? true
+        : selectedFilter === "eligible"
+        ? drive.isEligible === true
+        : drive.category === selectedFilter;
 
     return matchesSearch && matchesFilter;
   });
@@ -194,6 +270,7 @@ const Drives = () => {
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
             {[
               { id: "all", label: "All Drives" },
+              { id: "eligible", label: "Eligible for Me" },
               { id: "fullstack", label: "Full Stack" },
               { id: "software", label: "Software Dev" },
               { id: "frontend", label: "Frontend" },
@@ -231,9 +308,17 @@ const Drives = () => {
                   {/* Company Logo and Mode */}
                   <div className="flex items-start justify-between gap-3 mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="h-12 w-12 rounded-xl bg-blue-50 text-blue-700 font-extrabold text-base flex items-center justify-center border border-blue-100 shrink-0">
-                        {drive.shortName}
-                      </div>
+                      {drive.logo ? (
+                        <img
+                          src={drive.logo}
+                          alt={drive.company}
+                          className="h-12 w-12 rounded-xl object-contain border border-slate-200 bg-white p-1 shrink-0"
+                        />
+                      ) : (
+                        <div className="h-12 w-12 rounded-xl bg-blue-50 text-blue-700 font-extrabold text-base flex items-center justify-center border border-blue-100 shrink-0">
+                          {drive.shortName}
+                        </div>
+                      )}
                       <div>
                         <h3 className="font-bold text-slate-900 text-base leading-tight">
                           {drive.company}
@@ -297,6 +382,32 @@ const Drives = () => {
                       )}
                     </div>
                   </div>
+
+                  {/* Smart Eligibility & Application Status Tag */}
+                  {drive.isEligible !== undefined && (
+                    <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                      {drive.isEligible ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                          <CheckCircle2 size={12} className="text-emerald-600" />
+                          Eligible to Apply
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200"
+                          title={drive.ineligibilityReason}
+                        >
+                          <XCircle size={12} className="text-rose-500" />
+                          Ineligible
+                        </span>
+                      )}
+
+                      {drive.hasApplied && (
+                        <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-200">
+                          {drive.applicationStatus || "Applied"}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Card Footer */}

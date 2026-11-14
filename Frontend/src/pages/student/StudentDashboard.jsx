@@ -31,12 +31,22 @@ import {
   Mail,
   Phone,
   FileText,
+  AlertCircle,
+  Sparkles,
+  Check,
 } from "lucide-react";
 
 const StudentDashboard = () => {
   const [applications, setApplications] = useState([]);
   const [interviews, setInterviews] = useState([]);
   const [drives, setDrives] = useState([]);
+  const [opportunities, setOpportunities] = useState([]);
+  const [opportunitiesTab, setOpportunitiesTab] = useState("eligible"); // 'eligible' | 'all'
+  const [applyingDriveId, setApplyingDriveId] = useState(null);
+  const [driveDetailsModal, setDriveDetailsModal] = useState({
+    isOpen: false,
+    drive: null,
+  });
   const [notifications, setNotifications] = useState([]);
   const [suggestedCompanies, setSuggestedCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -70,14 +80,21 @@ const StudentDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const [appsRes, interviewsRes, drivesRes, notifsRes, suggestRes] =
-        await Promise.allSettled([
-          applicationsAPI.getMyApplications(),
-          interviewsAPI.getMyInterviews(),
-          placementDrivesAPI.getActive(),
-          notificationsAPI.getNotifications(),
-          studentAPI.getMySuggestedCompanies(),
-        ]);
+      const [
+        appsRes,
+        interviewsRes,
+        drivesRes,
+        notifsRes,
+        suggestRes,
+        oppsRes,
+      ] = await Promise.allSettled([
+        applicationsAPI.getMyApplications(),
+        interviewsAPI.getMyInterviews(),
+        placementDrivesAPI.getActive(),
+        notificationsAPI.getNotifications(),
+        studentAPI.getMySuggestedCompanies(),
+        placementDrivesAPI.getStudentOpportunities(),
+      ]);
 
       if (appsRes.status === "fulfilled" && appsRes.value?.data?.success) {
         setApplications(appsRes.value.data.applications || []);
@@ -94,7 +111,10 @@ const StudentDashboard = () => {
         setDrives(drivesRes.value.data.drives || []);
       }
 
-      if (notifsRes.status === "fulfilled" && notifsRes.value?.data?.notifications) {
+      if (
+        notifsRes.status === "fulfilled" &&
+        notifsRes.value?.data?.notifications
+      ) {
         setNotifications(notifsRes.value.data.notifications || []);
       }
 
@@ -104,10 +124,81 @@ const StudentDashboard = () => {
       ) {
         setSuggestedCompanies(suggestRes.value.data.suggestions || []);
       }
+
+      if (
+        oppsRes.status === "fulfilled" &&
+        oppsRes.value?.data?.success
+      ) {
+        setOpportunities(oppsRes.value.data.opportunities || []);
+      }
     } catch (err) {
       console.error("Student dashboard data error:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleApplyNow = async (drive) => {
+    if (drive.hasApplied) {
+      showToast(
+        `Already applied for ${drive.role} at ${drive.companyName}. Current status: ${
+          drive.applicationStatus || "Applied"
+        }`
+      );
+      return;
+    }
+    if (!drive.isEligible) {
+      alert(
+        `You do not meet the eligibility requirements for this drive.\n\nReason: ${
+          drive.ineligibilityReason || "Please check your profile details, CGPA, and branch."
+        }`
+      );
+      return;
+    }
+    if (drive.isDeadlinePassed) {
+      alert("Application deadline for this drive has already passed.");
+      return;
+    }
+
+    const confirmApply = window.confirm(
+      `Confirm your application for ${drive.role} at ${drive.companyName}?\nPackage: ${drive.package}\nLocation: ${drive.location}`
+    );
+    if (!confirmApply) return;
+
+    try {
+      setApplyingDriveId(drive._id);
+      const res = await applicationsAPI.apply(drive._id);
+      if (res.data?.success) {
+        showToast(
+          `Application submitted successfully for ${drive.role} at ${drive.companyName}!`
+        );
+        // Instantly reflect in local opportunities state
+        setOpportunities((prev) =>
+          prev.map((o) =>
+            o._id === drive._id
+              ? { ...o, hasApplied: true, applicationStatus: "Applied" }
+              : o
+          )
+        );
+        if (driveDetailsModal.isOpen && driveDetailsModal.drive?._id === drive._id) {
+          setDriveDetailsModal((prev) => ({
+            ...prev,
+            drive: { ...prev.drive, hasApplied: true, applicationStatus: "Applied" },
+          }));
+        }
+        // Refresh dashboard data to sync applications and interviews
+        fetchDashboardData();
+      } else {
+        alert(res.data?.message || "Failed to submit application.");
+      }
+    } catch (err) {
+      console.error("Apply error:", err);
+      alert(
+        err.response?.data?.message ||
+          "Failed to apply. Make sure your profile is complete and meets all requirements."
+      );
+    } finally {
+      setApplyingDriveId(null);
     }
   };
 
@@ -573,62 +664,275 @@ const StudentDashboard = () => {
           )}
         </section>
 
-        {/* Placement Drives Section */}
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-slate-100 p-6 sm:flex-row sm:items-center sm:justify-between">
+        {/* =========================================================
+            PLACEMENT OPPORTUNITIES SECTION (Requirement 5 & 6)
+        ========================================================= */}
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          {/* Header & Tabs */}
+          <div className="flex flex-col gap-4 border-b border-slate-100 p-6 sm:flex-row sm:items-center sm:justify-between bg-slate-50/50">
             <div>
-              <h2 className="font-semibold text-slate-900">
-                Active Placement Drives
-              </h2>
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
+                  <Sparkles size={16} />
+                </span>
+                <h2 className="font-bold text-slate-900 text-base">
+                  Placement Opportunities
+                </h2>
+              </div>
               <p className="mt-1 text-xs text-slate-500">
-                Campus opportunities currently open for application.
+                Live placement drives smart-matched with your CGPA, branch, batch & skills.
               </p>
             </div>
 
-            <Link
-              to="/student/drives"
-              className="text-xs font-semibold text-blue-600 hover:underline"
-            >
-              View all drives &rarr;
-            </Link>
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-xl bg-slate-100 p-1 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setOpportunitiesTab("eligible")}
+                  className={`rounded-lg px-3 py-1.5 transition cursor-pointer ${
+                    opportunitiesTab === "eligible"
+                      ? "bg-white text-blue-600 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Eligible for Me ({opportunities.filter((o) => o.isEligible).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpportunitiesTab("all")}
+                  className={`rounded-lg px-3 py-1.5 transition cursor-pointer ${
+                    opportunitiesTab === "all"
+                      ? "bg-white text-blue-600 shadow-sm"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  All Campus Drives ({opportunities.length || drives.length})
+                </button>
+              </div>
+
+              <Link
+                to="/student/drives"
+                className="text-xs font-semibold text-blue-600 hover:underline hidden sm:inline"
+              >
+                Full Catalog &rarr;
+              </Link>
+            </div>
           </div>
 
-          {drives.length > 0 ? (
-            <div className="divide-y divide-slate-100">
-              {drives.slice(0, 4).map((drive) => (
-                <div
-                  key={drive._id}
-                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-5 gap-3 hover:bg-slate-50 transition"
-                >
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">
-                      {drive.role}
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {drive.company?.companyName || "Company Partner"} • {drive.location || "College Campus"}
-                    </p>
-                  </div>
+          {/* List of Opportunities */}
+          {(() => {
+            const displayList =
+              opportunities.length > 0
+                ? opportunitiesTab === "eligible"
+                  ? opportunities.filter((o) => o.isEligible)
+                  : opportunities
+                : drives.map((d) => ({
+                    _id: d._id,
+                    companyName: d.company?.companyName || "Partner Company",
+                    companyLogo: d.company?.logo || "",
+                    role: d.role,
+                    package: d.package,
+                    jobType: d.jobType || "Full-Time",
+                    location: d.location || "College Campus",
+                    skills: d.skills || [],
+                    eligibility: d.eligibility || {},
+                    applicationDeadline: d.applicationDeadline,
+                    isEligible: true,
+                    hasApplied: applications.some(
+                      (a) => a.drive?._id === d._id || a.drive === d._id
+                    ),
+                  }));
 
-                  <div className="flex items-center gap-4">
-                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg">
-                      {drive.package}
-                    </span>
-
-                    <Link
-                      to={`/student/drive/${drive._id}`}
-                      className="rounded-xl bg-blue-50 px-3.5 py-2 text-xs font-semibold text-blue-600 hover:bg-blue-600 hover:text-white transition"
-                    >
-                      View Details
-                    </Link>
+            if (displayList.length === 0) {
+              return (
+                <div className="p-10 text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400 mb-3">
+                    <BriefcaseBusiness size={22} />
                   </div>
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    {opportunitiesTab === "eligible"
+                      ? "No currently eligible drives"
+                      : "No active drives available"}
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500 max-w-sm mx-auto">
+                    {opportunitiesTab === "eligible"
+                      ? "You do not currently meet the CGPA, branch, or batch criteria for ongoing drives. Check the 'All Campus Drives' tab to see criteria."
+                      : "Campus placement drives will appear here once approved by the placement cell."}
+                  </p>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-8 text-center text-xs text-slate-400">
-              No active drives posted currently.
-            </div>
-          )}
+              );
+            }
+
+            return (
+              <div className="divide-y divide-slate-100">
+                {displayList.map((opp) => {
+                  const companyInitials = (opp.companyName || "CP")
+                    .split(" ")
+                    .map((n) => n[0])
+                    .join("")
+                    .slice(0, 2)
+                    .toUpperCase();
+
+                  const deadlineStr = opp.applicationDeadline
+                    ? new Date(opp.applicationDeadline).toLocaleDateString("en-US", {
+                        day: "numeric",
+                        month: "short",
+                        year: "numeric",
+                      })
+                    : "Open";
+
+                  return (
+                    <div
+                      key={opp._id}
+                      className="p-5 sm:p-6 hover:bg-slate-50/70 transition flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                    >
+                      {/* Left: Company & Role Details */}
+                      <div className="flex items-start gap-4 flex-1">
+                        {opp.companyLogo ? (
+                          <img
+                            src={opp.companyLogo}
+                            alt={opp.companyName}
+                            className="h-12 w-12 rounded-xl object-contain border border-slate-200 bg-white p-1 shrink-0"
+                          />
+                        ) : (
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700 font-bold text-sm border border-blue-100">
+                            {companyInitials}
+                          </div>
+                        )}
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-sm font-bold text-slate-900">
+                              {opp.role}
+                            </h3>
+                            <span className="text-xs font-semibold text-slate-500">
+                              • {opp.companyName}
+                            </span>
+                            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                              {opp.jobType || "Full-Time"}
+                            </span>
+                          </div>
+
+                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                            <span className="flex items-center gap-1">
+                              <MapPin size={12} className="text-slate-400" />
+                              {opp.location || "College Campus"}
+                            </span>
+                            <span className="flex items-center gap-1 font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                              <DollarSign size={11} className="-mr-0.5" />
+                              {opp.package}
+                            </span>
+                            {opp.eligibility?.passingYear && (
+                              <span className="text-slate-500">
+                                Batch: <strong className="text-slate-700">{opp.eligibility.passingYear}</strong>
+                              </span>
+                            )}
+                            <span className="text-slate-500">
+                              Deadline: <span className={opp.isDeadlinePassed ? "text-rose-600 font-semibold" : "text-slate-700"}>{deadlineStr}</span>
+                            </span>
+                          </div>
+
+                          {/* Skills preview */}
+                          {opp.skills && opp.skills.length > 0 && (
+                            <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                              {opp.skills.slice(0, 4).map((s, idx) => (
+                                <span
+                                  key={idx}
+                                  className="rounded-lg bg-blue-50/70 border border-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700"
+                                >
+                                  {s}
+                                </span>
+                              ))}
+                              {opp.skills.length > 4 && (
+                                <span className="text-[11px] text-slate-400 font-medium">
+                                  +{opp.skills.length - 4} more
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right: Smart Eligibility & Action Buttons */}
+                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 pt-3 lg:pt-0 border-t border-slate-100 lg:border-t-0 justify-between lg:justify-end">
+                        {/* Eligibility Status Badge */}
+                        <div>
+                          {opp.isEligible ? (
+                            <span
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              title="Your verified CGPA, branch, batch, and skills meet the criteria"
+                            >
+                              <CheckCircle2 size={13} className="text-emerald-600" />
+                              Eligible to Apply
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setDriveDetailsModal({ isOpen: true, drive: opp })}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition cursor-pointer"
+                              title={opp.ineligibilityReason || "Click to see criteria mismatch"}
+                            >
+                              <XCircle size={13} className="text-rose-500" />
+                              Not Eligible
+                              <Info size={11} className="text-rose-400 ml-0.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* View Details Button */}
+                        <button
+                          type="button"
+                          onClick={() => setDriveDetailsModal({ isOpen: true, drive: opp })}
+                          className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                        >
+                          View Details
+                        </button>
+
+                        {/* Application Action / Status */}
+                        {opp.hasApplied ? (
+                          <span className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold ${
+                            opp.applicationStatus === "Selected"
+                              ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                              : opp.applicationStatus === "Shortlisted"
+                              ? "bg-amber-100 text-amber-800 border border-amber-200"
+                              : opp.applicationStatus === "Rejected"
+                              ? "bg-rose-100 text-rose-800 border border-rose-200"
+                              : "bg-blue-50 text-blue-700 border border-blue-200"
+                          }`}>
+                            <CheckCircle2 size={13} />
+                            {opp.applicationStatus || "Applied"}
+                          </span>
+                        ) : opp.isEligible ? (
+                          <button
+                            type="button"
+                            onClick={() => handleApplyNow(opp)}
+                            disabled={applyingDriveId === opp._id || opp.isDeadlinePassed}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 transition cursor-pointer"
+                          >
+                            {applyingDriveId === opp._id ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <Send size={13} />
+                            )}
+                            {opp.isDeadlinePassed ? "Deadline Passed" : "Apply Now"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            className="rounded-xl bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-400 cursor-not-allowed border border-slate-200"
+                            title={opp.ineligibilityReason}
+                          >
+                            Ineligible
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </section>
 
         {/* =========================================================
@@ -850,6 +1154,251 @@ const StudentDashboard = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================
+            MODAL: DRIVE DETAILS & SMART ELIGIBILITY (Requirement 5 & 6)
+        ========================================================= */}
+        {driveDetailsModal.isOpen && driveDetailsModal.drive && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+            <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  {driveDetailsModal.drive.companyLogo ? (
+                    <img
+                      src={driveDetailsModal.drive.companyLogo}
+                      alt=""
+                      className="h-10 w-10 rounded-xl object-contain border border-slate-200 bg-white p-1"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white font-bold text-sm">
+                      {(driveDetailsModal.drive.companyName || "CP").slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">
+                      {driveDetailsModal.drive.role}
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      {driveDetailsModal.drive.companyName} • {driveDetailsModal.drive.location || "Campus"}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setDriveDetailsModal({ isOpen: false, drive: null })}
+                  className="rounded-xl p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="overflow-y-auto p-6 space-y-5 text-xs text-slate-600">
+                {/* Highlights Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-400">Package / CTC</p>
+                    <p className="text-sm font-bold text-emerald-600 mt-0.5">{driveDetailsModal.drive.package}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-400">Job Type</p>
+                    <p className="text-sm font-bold text-slate-800 mt-0.5">{driveDetailsModal.drive.jobType || "Full-Time"}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-400">Vacancies</p>
+                    <p className="text-sm font-bold text-slate-800 mt-0.5">{driveDetailsModal.drive.vacancies || "Open"}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold text-slate-400">Deadline</p>
+                    <p className="text-sm font-bold text-slate-800 mt-0.5">
+                      {driveDetailsModal.drive.applicationDeadline
+                        ? new Date(driveDetailsModal.drive.applicationDeadline).toLocaleDateString()
+                        : "Open"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Smart Eligibility Analysis Card */}
+                <div className={`p-4 rounded-xl border ${
+                  driveDetailsModal.drive.isEligible
+                    ? "bg-emerald-50/70 border-emerald-200 text-emerald-900"
+                    : "bg-rose-50/70 border-rose-200 text-rose-900"
+                }`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    {driveDetailsModal.drive.isEligible ? (
+                      <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle size={18} className="text-rose-600 shrink-0" />
+                    )}
+                    <h4 className="font-bold text-sm">
+                      {driveDetailsModal.drive.isEligible
+                        ? "You are Eligible for this Placement Drive!"
+                        : "Eligibility Criteria Notice"}
+                    </h4>
+                  </div>
+
+                  {!driveDetailsModal.drive.isEligible && driveDetailsModal.drive.ineligibilityReason && (
+                    <p className="text-xs font-semibold text-rose-700 bg-white/70 p-2.5 rounded-lg border border-rose-200 mb-3">
+                      <strong>Mismatch Reason:</strong> {driveDetailsModal.drive.ineligibilityReason}
+                    </p>
+                  )}
+
+                  {/* Criteria Checklist */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-slate-700">Min CGPA:</span>{" "}
+                      <span>{driveDetailsModal.drive.eligibility?.minCGPA || "None"}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-slate-700">Max Backlogs:</span>{" "}
+                      <span>{driveDetailsModal.drive.eligibility?.maxBacklogs ?? 0}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 sm:col-span-2">
+                      <span className="font-semibold text-slate-700">Eligible Branches:</span>{" "}
+                      <span>
+                        {driveDetailsModal.drive.eligibility?.branches?.length > 0
+                          ? driveDetailsModal.drive.eligibility.branches.join(", ")
+                          : "All Branches"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-slate-700">Batch / Passing Year:</span>{" "}
+                      <span>{driveDetailsModal.drive.eligibility?.passingYear || "All Batches"}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Required Technical Skills */}
+                {driveDetailsModal.drive.skills && driveDetailsModal.drive.skills.length > 0 && (
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider mb-2">
+                      Required Technical Skills
+                    </h4>
+                    <div className="flex flex-wrap gap-1.5">
+                      {driveDetailsModal.drive.skills.map((skill, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-semibold border border-blue-200 text-xs"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Selection Process Rounds */}
+                {driveDetailsModal.drive.selectionProcess && driveDetailsModal.drive.selectionProcess.length > 0 && (
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider mb-2">
+                      Selection Process
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {driveDetailsModal.drive.selectionProcess.map((round, idx) => (
+                        <span
+                          key={idx}
+                          className="flex items-center gap-1 px-3 py-1 rounded-full bg-slate-100 text-slate-700 font-medium text-xs border border-slate-200"
+                        >
+                          <span className="h-4 w-4 rounded-full bg-slate-700 text-white flex items-center justify-center text-[10px] font-bold">
+                            {idx + 1}
+                          </span>
+                          {round}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Job Description */}
+                {driveDetailsModal.drive.description && (
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1.5">
+                      Job Description
+                    </h4>
+                    <p className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed whitespace-pre-line">
+                      {driveDetailsModal.drive.description}
+                    </p>
+                  </div>
+                )}
+
+                {/* Additional Instructions */}
+                {driveDetailsModal.drive.additionalInstructions && (
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider mb-1.5">
+                      Additional Instructions
+                    </h4>
+                    <p className="bg-amber-50/70 p-3 rounded-xl border border-amber-200 text-xs text-amber-900 leading-relaxed whitespace-pre-line">
+                      {driveDetailsModal.drive.additionalInstructions}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-6 py-4">
+                <div>
+                  {driveDetailsModal.drive.hasApplied ? (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-200">
+                      <CheckCircle2 size={14} /> Status: {driveDetailsModal.drive.applicationStatus || "Applied"}
+                    </span>
+                  ) : driveDetailsModal.drive.isEligible ? (
+                    <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                      <CheckCircle2 size={14} /> Ready to apply
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold text-rose-600 flex items-center gap-1">
+                      <XCircle size={14} /> Criteria mismatch
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setDriveDetailsModal({ isOpen: false, drive: null })}
+                    className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                  >
+                    Close
+                  </button>
+
+                  {driveDetailsModal.drive.hasApplied ? (
+                    <button
+                      type="button"
+                      disabled
+                      className="rounded-xl bg-slate-100 border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-500 cursor-not-allowed"
+                    >
+                      Already Applied
+                    </button>
+                  ) : driveDetailsModal.drive.isEligible ? (
+                    <button
+                      type="button"
+                      onClick={() => handleApplyNow(driveDetailsModal.drive)}
+                      disabled={applyingDriveId === driveDetailsModal.drive._id || driveDetailsModal.drive.isDeadlinePassed}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-5 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 transition cursor-pointer"
+                    >
+                      {applyingDriveId === driveDetailsModal.drive._id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Send size={14} />
+                      )}
+                      {driveDetailsModal.drive.isDeadlinePassed ? "Deadline Expired" : "Confirm & Apply Now"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="rounded-xl bg-slate-100 border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-400 cursor-not-allowed"
+                    >
+                      Not Eligible to Apply
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         )}

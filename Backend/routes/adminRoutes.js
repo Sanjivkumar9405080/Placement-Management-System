@@ -15,6 +15,13 @@ const {
   getAdminPlacementDriveDetails,
   getAdminDriveApplicants,
   closePlacementDriveByAdmin,
+  adminCreatePlacementDrive,
+  approvePlacementDrive,
+  rejectPlacementDrive,
+  requestDriveChanges,
+  updatePlacementDriveByAdmin,
+  deletePlacementDriveByAdmin,
+  getDriveEligibleStudents,
   getAllApplications,
   getAdminApplicationDetails,
   shareStudentsWithCompany,
@@ -119,12 +126,68 @@ router.get(
   getAllPlacementDrives
 );
 
+// Admin creates placement drive on behalf of company
+router.post(
+  "/drives",
+  protect,
+  authorizeRoles("admin"),
+  adminCreatePlacementDrive
+);
+
 // Get single placement drive details
 router.get(
   "/drives/:id",
   protect,
   authorizeRoles("admin"),
   getAdminPlacementDriveDetails
+);
+
+// Admin updates placement drive
+router.put(
+  "/drives/:id",
+  protect,
+  authorizeRoles("admin"),
+  updatePlacementDriveByAdmin
+);
+
+// Admin deletes placement drive
+router.delete(
+  "/drives/:id",
+  protect,
+  authorizeRoles("admin"),
+  deletePlacementDriveByAdmin
+);
+
+// Admin approves placement drive
+router.put(
+  "/drives/:id/approve",
+  protect,
+  authorizeRoles("admin"),
+  approvePlacementDrive
+);
+
+// Admin rejects placement drive with reason
+router.put(
+  "/drives/:id/reject",
+  protect,
+  authorizeRoles("admin"),
+  rejectPlacementDrive
+);
+
+// Admin requests changes from company
+router.put(
+  "/drives/:id/request-changes",
+  protect,
+  authorizeRoles("admin"),
+  requestDriveChanges
+);
+
+// Get eligible students preview for a specific drive
+router.get(
+  "/drives/:id/eligible-students",
+  protect,
+  authorizeRoles("admin"),
+  getDriveEligibleStudents
 );
 
 // Get applicants for specific drive

@@ -11,6 +11,14 @@ const Register = () => {
     password: "",
     confirmPassword: "",
     role: "student",
+    // Company specific details
+    companyName: "",
+    hrName: "",
+    phone: "",
+    website: "",
+    location: "College Campus",
+    description: "",
+    logo: "",
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -63,13 +71,27 @@ const Register = () => {
     setErrorMessage("");
 
     // Client-side validations
-    if (!formData.name.trim()) {
-      setErrorMessage("Please enter your full name.");
+    const finalName =
+      formData.role === "company"
+        ? formData.companyName.trim() || formData.name.trim()
+        : formData.name.trim();
+
+    if (!finalName) {
+      setErrorMessage(
+        formData.role === "company"
+          ? "Please enter your company name."
+          : "Please enter your full name."
+      );
       return;
     }
 
     if (!formData.email.trim()) {
       setErrorMessage("Please enter a valid email address.");
+      return;
+    }
+
+    if (formData.role === "company" && !formData.hrName.trim() && !formData.name.trim()) {
+      setErrorMessage("Please enter the HR / Recruiter name.");
       return;
     }
 
@@ -97,10 +119,21 @@ const Register = () => {
 
     try {
       const payload = {
-        name: formData.name.trim(),
+        name: finalName,
         email: formData.email.trim(),
         password: formData.password,
         role: formData.role,
+        ...(formData.role === "company"
+          ? {
+              companyName: finalName,
+              hrName: formData.hrName.trim() || formData.name.trim(),
+              phone: formData.phone.trim(),
+              website: formData.website.trim(),
+              location: formData.location.trim() || "College Campus",
+              description: formData.description.trim(),
+              logo: formData.logo.trim(),
+            }
+          : {}),
       };
 
       const response = await api.post("/auth/register", payload);
@@ -108,7 +141,10 @@ const Register = () => {
       if (response.status === 201 || response.status === 200) {
         navigate("/login", {
           state: {
-            message: "Account created successfully! Please sign in with your credentials.",
+            message:
+              formData.role === "company"
+                ? "Company registered successfully! Your account has been submitted for placement cell approval."
+                : "Account created successfully! Please sign in with your credentials.",
             email: formData.email.trim(),
           },
         });
@@ -336,61 +372,219 @@ const Register = () => {
                   </div>
                 </div>
 
-                {/* Full Name Field */}
-                <div>
-                  <label
-                    htmlFor="name"
-                    className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
-                  >
-                    {formData.role === "company" ? "Company / Representative Name" : "Full Name"}
-                  </label>
-                  <div className="relative rounded-xl shadow-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
+                {/* Company Account Information Banner */}
+                {formData.role === "company" && (
+                  <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200 text-blue-900 text-xs flex items-start gap-2.5">
+                    <svg className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                      <p className="font-bold">Official Company Registration</p>
+                      <p className="text-[11px] text-blue-700 mt-0.5">
+                        Company accounts are verified and approved by the Placement Cell before recruitment features are unlocked.
+                      </p>
                     </div>
-                    <input
-                      id="name"
-                      name="name"
-                      type="text"
-                      autoComplete="name"
-                      required
-                      value={formData.name}
-                      onChange={handleChange}
-                      placeholder={formData.role === "company" ? "e.g. Acme Corp Careers / Sarah Connor" : "e.g. Alex Johnson"}
-                      className="block w-full rounded-xl border border-slate-300 pl-11 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
-                    />
                   </div>
-                </div>
+                )}
 
-                {/* Email Field */}
-                <div>
-                  <label
-                    htmlFor="email"
-                    className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
-                  >
-                    {formData.role === "company" ? "Corporate Work Email" : "Institutional / Student Email"}
-                  </label>
-                  <div className="relative rounded-xl shadow-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
-                      </svg>
+                {/* Company Name & HR Name Fields for Company */}
+                {formData.role === "company" ? (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label
+                          htmlFor="companyName"
+                          className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                        >
+                          Company Name *
+                        </label>
+                        <input
+                          id="companyName"
+                          name="companyName"
+                          type="text"
+                          required
+                          value={formData.companyName}
+                          onChange={handleChange}
+                          placeholder="e.g. Microsoft / Infosys"
+                          className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="hrName"
+                          className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                        >
+                          HR / Recruiter Name *
+                        </label>
+                        <input
+                          id="hrName"
+                          name="hrName"
+                          type="text"
+                          required
+                          value={formData.hrName}
+                          onChange={handleChange}
+                          placeholder="e.g. Sarah Connor (Talent Acq.)"
+                          className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                        />
+                      </div>
                     </div>
-                    <input
-                      id="email"
-                      name="email"
-                      type="email"
-                      autoComplete="email"
-                      required
-                      value={formData.email}
-                      onChange={handleChange}
-                      placeholder={formData.role === "company" ? "hr@company.com" : "student@college.edu"}
-                      className="block w-full rounded-xl border border-slate-300 pl-11 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
-                    />
-                  </div>
-                </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label
+                          htmlFor="email"
+                          className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                        >
+                          Official Work Email *
+                        </label>
+                        <input
+                          id="email"
+                          name="email"
+                          type="email"
+                          autoComplete="email"
+                          required
+                          value={formData.email}
+                          onChange={handleChange}
+                          placeholder="recruiter@company.com"
+                          className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="phone"
+                          className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                        >
+                          Contact Number
+                        </label>
+                        <input
+                          id="phone"
+                          name="phone"
+                          type="tel"
+                          value={formData.phone}
+                          onChange={handleChange}
+                          placeholder="e.g. +91 98765 43210"
+                          className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label
+                          htmlFor="website"
+                          className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                        >
+                          Company Website
+                        </label>
+                        <input
+                          id="website"
+                          name="website"
+                          type="url"
+                          value={formData.website}
+                          onChange={handleChange}
+                          placeholder="https://company.com"
+                          className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="location"
+                          className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                        >
+                          Location / Headquarters
+                        </label>
+                        <input
+                          id="location"
+                          name="location"
+                          type="text"
+                          value={formData.location}
+                          onChange={handleChange}
+                          placeholder="e.g. Bengaluru, Karnataka"
+                          className="block w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="description"
+                        className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                      >
+                        Company Description
+                      </label>
+                      <textarea
+                        id="description"
+                        name="description"
+                        rows="2"
+                        value={formData.description}
+                        onChange={handleChange}
+                        placeholder="Brief overview of company business, domain, and products..."
+                        className="block w-full rounded-xl border border-slate-300 px-3.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Full Name Field for Student */}
+                    <div>
+                      <label
+                        htmlFor="name"
+                        className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                      >
+                        Full Name
+                      </label>
+                      <div className="relative rounded-xl shadow-sm">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                        </div>
+                        <input
+                          id="name"
+                          name="name"
+                          type="text"
+                          autoComplete="name"
+                          required
+                          value={formData.name}
+                          onChange={handleChange}
+                          placeholder="e.g. Alex Johnson"
+                          className="block w-full rounded-xl border border-slate-300 pl-11 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Email Field for Student */}
+                    <div>
+                      <label
+                        htmlFor="email"
+                        className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5"
+                      >
+                        Institutional / Student Email
+                      </label>
+                      <div className="relative rounded-xl shadow-sm">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207" />
+                          </svg>
+                        </div>
+                        <input
+                          id="email"
+                          name="email"
+                          type="email"
+                          autoComplete="email"
+                          required
+                          value={formData.email}
+                          onChange={handleChange}
+                          placeholder="student@college.edu"
+                          className="block w-full rounded-xl border border-slate-300 pl-11 pr-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 bg-slate-50/50 hover:bg-white focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all duration-150"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 {/* Password Field */}
                 <div>

@@ -10,8 +10,8 @@ const {
 } = require("../controllers/studentController");
 
 const {
-  getEligibleDrives,
-} = require("../controllers/driveController");
+  getStudentPlacementOpportunities,
+} = require("../controllers/placementDriveController");
 
 const { protect } = require("../middleware/authMiddleware");
 const { authorizeRoles } = require("../middleware/roleMiddleware");
@@ -52,7 +52,7 @@ router.get(
   "/eligible-drives",
   protect,
   authorizeRoles("student"),
-  getEligibleDrives
+  getStudentPlacementOpportunities
 );
 
 // Suggest a company

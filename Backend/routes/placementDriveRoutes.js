@@ -6,6 +6,7 @@ const {
   getActivePlacementDrives,
   getPlacementDriveById,
   getCompanyDrives,
+  getStudentPlacementOpportunities,
   updatePlacementDrive,
   closePlacementDrive,
 } = require("../controllers/placementDriveController");
@@ -27,6 +28,14 @@ router.get(
   protect,
   authorizeRoles("company"),
   getCompanyDrives
+);
+
+// Student get placement opportunities with smart eligibility
+router.get(
+  "/opportunities",
+  protect,
+  authorizeRoles("student"),
+  getStudentPlacementOpportunities
 );
 
 // Public / Student get all active drives

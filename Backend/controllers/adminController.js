@@ -8,6 +8,10 @@ const Notification = require("../models/Notification");
 const CompanySuggestion = require("../models/CompanySuggestion");
 const CompanyShare = require("../models/CompanyShare");
 const AdminNotificationLog = require("../models/AdminNotificationLog");
+const {
+  evaluateStudentEligibility,
+  deriveAcademicYear: helperDeriveAcademicYear,
+} = require("../utils/eligibilityHelper");
 
 // ==========================================
 // ADMIN DASHBOARD STATS
@@ -1086,10 +1090,10 @@ const getStudentDetails = async (req, res) => {
 // ==========================================
 const getAllPlacementDrives = async (req, res) => {
   try {
-    const { search, status, company } = req.query;
+    const { search, status, company, source } = req.query;
 
     const drives = await PlacementDrive.find()
-      .populate("company", "companyName logo location officialEmail status")
+      .populate("company", "companyName logo location officialEmail status hrName phone")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -1116,34 +1120,57 @@ const getAllPlacementDrives = async (req, res) => {
       }
     });
 
-    // 2. Format drive list
+    // 2. Fetch all students once to calculate smart eligibility counts efficiently
+    const allStudents = await Student.find().lean();
+
+    // 3. Format drive list
     let driveList = drives.map((d) => {
       const stats = statsMap[d._id.toString()] || {};
+      const eligibleCount = allStudents.filter((s) => {
+        return evaluateStudentEligibility(s, d).isEligible;
+      }).length;
+
       return {
         _id: d._id,
         company: d.company,
-        companyName: d.company?.companyName || "Unknown Company",
+        companyName:
+          d.company?.companyName || d.companyName || "Partner Company",
         companyLogo: d.company?.logo || "",
-        companyLocation: d.company?.location || "Campus",
+        companyLocation: d.company?.location || d.location || "Campus",
+        companyEmail: d.company?.officialEmail || d.invitedCompanyEmail || "",
         role: d.role,
         package: d.package,
+        jobType: d.jobType || "Full-Time",
+        vacancies: d.vacancies || "Open",
+        experience: d.experience || "Fresher",
         description: d.description || "",
+        additionalInstructions: d.additionalInstructions || "",
         eligibility: d.eligibility || {},
         skills: d.skills || [],
+        selectionProcess: d.selectionProcess || [],
         location: d.location || "College Campus",
         driveDate: d.driveDate,
         applicationDeadline: d.applicationDeadline,
         status: d.status || "Active",
+        createdSource: d.createdSource || "company",
+        createdBy: d.createdBy,
+        rejectionReason: d.rejectionReason || "",
+        changeRequests: d.changeRequests || "",
         applicantsCount: stats.totalApplicants || 0,
         shortlistedCount: stats.shortlisted || 0,
         selectedCount: stats.selected || 0,
+        eligibleStudentsCount: eligibleCount,
         createdAt: d.createdAt,
       };
     });
 
     // Extract dynamic unique companies list for filter dropdown
     const availableCompanies = Array.from(
-      new Set(drives.map((d) => d.company?.companyName).filter(Boolean))
+      new Set(
+        drives
+          .map((d) => d.company?.companyName || d.companyName)
+          .filter(Boolean)
+      )
     ).sort();
 
     // Search filter
@@ -1152,14 +1179,35 @@ const getAllPlacementDrives = async (req, res) => {
       driveList = driveList.filter(
         (d) =>
           d.companyName.toLowerCase().includes(q) ||
-          d.role.toLowerCase().includes(q)
+          d.role.toLowerCase().includes(q) ||
+          (d.skills && d.skills.some((sk) => sk.toLowerCase().includes(q)))
       );
     }
 
     // Status filter
     if (status && status !== "All") {
+      const statusLower = status.trim().toLowerCase();
+      if (statusLower === "pending" || statusLower === "pending approval") {
+        driveList = driveList.filter(
+          (d) => d.status.toLowerCase() === "pending approval"
+        );
+      } else if (statusLower === "approved" || statusLower === "active") {
+        driveList = driveList.filter(
+          (d) =>
+            d.status.toLowerCase() === "active" ||
+            d.status.toLowerCase() === "approved"
+        );
+      } else {
+        driveList = driveList.filter(
+          (d) => d.status.toLowerCase() === statusLower
+        );
+      }
+    }
+
+    // Source filter (admin vs company)
+    if (source && source !== "all") {
       driveList = driveList.filter(
-        (d) => d.status.toLowerCase() === status.toLowerCase()
+        (d) => d.createdSource.toLowerCase() === source.toLowerCase()
       );
     }
 
@@ -1170,18 +1218,682 @@ const getAllPlacementDrives = async (req, res) => {
       );
     }
 
+    // Dynamic counts by tab
+    const tabCounts = {
+      all: drives.length,
+      pending: drives.filter(
+        (d) => d.status && d.status.toLowerCase() === "pending approval"
+      ).length,
+      approved: drives.filter(
+        (d) =>
+          d.status &&
+          (d.status.toLowerCase() === "active" ||
+            d.status.toLowerCase() === "approved")
+      ).length,
+      rejected: drives.filter(
+        (d) => d.status && d.status.toLowerCase() === "rejected"
+      ).length,
+      completed: drives.filter(
+        (d) =>
+          d.status &&
+          (d.status.toLowerCase() === "completed" ||
+            d.status.toLowerCase() === "closed")
+      ).length,
+      adminCreated: drives.filter((d) => d.createdSource === "admin").length,
+      companyCreated: drives.filter((d) => d.createdSource === "company").length,
+    };
+
     res.status(200).json({
       success: true,
       drives: driveList,
       total: driveList.length,
+      tabCounts,
       availableCompanies,
-      availableStatuses: ["Active", "Closed", "Completed"],
+      availableStatuses: [
+        "All",
+        "Pending Approval",
+        "Active",
+        "Rejected",
+        "Closed",
+        "Completed",
+      ],
     });
   } catch (error) {
     console.error("Get all placement drives error:", error);
     res.status(500).json({
       success: false,
       message: "Server error fetching placement drives",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - CREATE PLACEMENT DRIVE ON BEHALF OF COMPANY
+// ==========================================
+const adminCreatePlacementDrive = async (req, res) => {
+  try {
+    const {
+      companyId,
+      companyName,
+      officialEmail,
+      hrName,
+      phone,
+      location,
+      website,
+      role,
+      package: salaryPackage,
+      jobType,
+      vacancies,
+      experience,
+      description,
+      additionalInstructions,
+      eligibility,
+      skills,
+      selectionProcess,
+      driveDate,
+      applicationDeadline,
+    } = req.body;
+
+    if (!role || !salaryPackage || !applicationDeadline) {
+      return res.status(400).json({
+        success: false,
+        message: "Role, salary package, and application deadline are required.",
+      });
+    }
+
+    let targetCompany = null;
+
+    // 1. If existing company selected by ID
+    if (companyId) {
+      targetCompany = await Company.findById(companyId);
+    }
+
+    // 2. If company not selected or entered manually
+    if (!targetCompany && companyName) {
+      const trimmedName = companyName.trim();
+      targetCompany = await Company.findOne({
+        $or: [
+          { companyName: new RegExp(`^${trimmedName}$`, "i") },
+          ...(officialEmail
+            ? [{ officialEmail: officialEmail.trim().toLowerCase() }]
+            : []),
+        ],
+      });
+
+      if (!targetCompany) {
+        // Create new company document on behalf of company
+        targetCompany = await Company.create({
+          userId: null,
+          companyName: trimmedName,
+          officialEmail: officialEmail ? officialEmail.trim().toLowerCase() : "",
+          hrName: hrName ? hrName.trim() : "",
+          phone: phone ? phone.trim() : "",
+          location: location ? location.trim() : "College Campus",
+          website: website ? website.trim() : "",
+          industry: "Technology",
+          isApproved: true,
+          status: "Active",
+        });
+      }
+    }
+
+    if (!targetCompany) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select an existing company or enter a new company name.",
+      });
+    }
+
+    // Parse eligibility
+    let parsedEligibility = {
+      branches: [],
+      minCGPA: 0,
+      passingYear: undefined,
+      academicYears: [],
+      backlogCriteria: "No active backlogs",
+      maxBacklogs: 0,
+    };
+
+    if (eligibility) {
+      if (Array.isArray(eligibility.branches)) {
+        parsedEligibility.branches = eligibility.branches;
+      } else if (typeof eligibility.branches === "string") {
+        parsedEligibility.branches = eligibility.branches
+          .split(",")
+          .map((b) => b.trim())
+          .filter(Boolean);
+      }
+
+      if (eligibility.minCGPA !== undefined && eligibility.minCGPA !== "") {
+        parsedEligibility.minCGPA = Number(eligibility.minCGPA);
+      }
+
+      if (
+        eligibility.passingYear !== undefined &&
+        eligibility.passingYear !== ""
+      ) {
+        parsedEligibility.passingYear = Number(eligibility.passingYear);
+      }
+
+      if (Array.isArray(eligibility.academicYears)) {
+        parsedEligibility.academicYears = eligibility.academicYears;
+      } else if (typeof eligibility.academicYears === "string") {
+        parsedEligibility.academicYears = eligibility.academicYears
+          .split(",")
+          .map((y) => y.trim())
+          .filter(Boolean);
+      }
+
+      if (eligibility.backlogCriteria) {
+        parsedEligibility.backlogCriteria = eligibility.backlogCriteria.trim();
+        if (
+          eligibility.backlogCriteria.toLowerCase().includes("no active") ||
+          eligibility.backlogCriteria.toLowerCase().includes("0")
+        ) {
+          parsedEligibility.maxBacklogs = 0;
+        } else if (eligibility.backlogCriteria.match(/\d+/)) {
+          parsedEligibility.maxBacklogs = Number(
+            eligibility.backlogCriteria.match(/\d+/)[0]
+          );
+        }
+      }
+
+      if (eligibility.maxBacklogs !== undefined) {
+        parsedEligibility.maxBacklogs = Number(eligibility.maxBacklogs);
+      }
+    }
+
+    // Parse skills
+    let parsedSkills = [];
+    if (Array.isArray(skills)) {
+      parsedSkills = skills;
+    } else if (typeof skills === "string") {
+      parsedSkills = skills.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+
+    // Parse selection process
+    let parsedRounds = [];
+    if (Array.isArray(selectionProcess)) {
+      parsedRounds = selectionProcess;
+    } else if (typeof selectionProcess === "string") {
+      parsedRounds = selectionProcess
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean);
+    }
+    if (parsedRounds.length === 0) {
+      parsedRounds = [
+        "Online Assessment",
+        "Technical Interview",
+        "HR Interview",
+      ];
+    }
+
+    // Admin created drives are published immediately upon saving (Active status)
+    const drive = await PlacementDrive.create({
+      company: targetCompany._id,
+      companyName: targetCompany.companyName,
+      invitedCompanyEmail: officialEmail || targetCompany.officialEmail || "",
+      createdSource: "admin",
+      createdBy: req.user._id,
+      role: role.trim(),
+      package: salaryPackage.trim(),
+      jobType: jobType || "Full-Time",
+      vacancies: vacancies ? String(vacancies).trim() : "Open",
+      experience: experience ? experience.trim() : "Fresher",
+      description: description ? description.trim() : "",
+      additionalInstructions: additionalInstructions
+        ? additionalInstructions.trim()
+        : "",
+      eligibility: parsedEligibility,
+      skills: parsedSkills,
+      selectionProcess: parsedRounds,
+      location: location
+        ? location.trim()
+        : targetCompany.location || "College Campus",
+      driveDate: driveDate ? new Date(driveDate) : undefined,
+      applicationDeadline: new Date(applicationDeadline),
+      status: "Active", // Published immediately
+    });
+
+    // Notify registered company user if company already has an account
+    if (targetCompany.userId) {
+      try {
+        await Notification.create({
+          userId: targetCompany.userId,
+          sender: req.user._id,
+          title: "New Placement Drive Created",
+          message: `The Placement Cell has published a new placement drive for "${drive.role}" on your company's behalf.`,
+          type: "drive",
+          targetAudience: "individual",
+        });
+      } catch (notifErr) {
+        console.warn("Failed to notify company of admin-created drive:", notifErr);
+      }
+    }
+
+    // Smartly identify eligible students and notify them
+    try {
+      const allStudents = await Student.find().populate("userId", "name email");
+      const eligibleStudents = allStudents.filter((s) => {
+        const evalRes = evaluateStudentEligibility(s, drive);
+        return evalRes.isEligible;
+      });
+
+      if (eligibleStudents.length > 0) {
+        const studentNotifs = eligibleStudents
+          .filter((s) => s.userId && s.userId._id)
+          .map((s) => ({
+            userId: s.userId._id,
+            sender: req.user._id,
+            title: `New Drive: ${drive.role} (${targetCompany.companyName})`,
+            message: `A new placement drive has been posted by ${targetCompany.companyName} for "${drive.role}" with CTC ${drive.package}. You meet the eligibility criteria!`,
+            type: "drive",
+            targetAudience: "students",
+          }));
+
+        if (studentNotifs.length > 0) {
+          await Notification.insertMany(studentNotifs);
+        }
+      }
+    } catch (studentNotifErr) {
+      console.warn("Failed to notify eligible students:", studentNotifErr);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Placement drive created and published successfully on behalf of ${targetCompany.companyName}!`,
+      drive,
+    });
+  } catch (error) {
+    console.error("Admin create placement drive error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error creating placement drive on behalf of company",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - APPROVE PLACEMENT DRIVE
+// ==========================================
+const approvePlacementDrive = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const drive = await PlacementDrive.findById(id).populate("company");
+
+    if (!drive) {
+      return res.status(404).json({
+        success: false,
+        message: "Placement drive not found",
+      });
+    }
+
+    drive.status = "Active";
+    drive.rejectionReason = "";
+    drive.changeRequests = "";
+    await drive.save();
+
+    // 1. Notify company
+    if (drive.company && drive.company.userId) {
+      try {
+        await Notification.create({
+          userId: drive.company.userId,
+          sender: req.user._id,
+          title: "Placement Drive Approved! 🎉",
+          message: `Your placement drive for "${drive.role}" has been approved by the Placement Cell and is now live for eligible students.`,
+          type: "drive",
+          targetAudience: "individual",
+        });
+      } catch (err) {
+        console.warn("Failed to notify company:", err);
+      }
+    }
+
+    // 2. Smartly notify all eligible students
+    try {
+      const allStudents = await Student.find().populate("userId", "name email");
+      const eligibleStudents = allStudents.filter((s) => {
+        const evalRes = evaluateStudentEligibility(s, drive);
+        return evalRes.isEligible;
+      });
+
+      if (eligibleStudents.length > 0) {
+        const studentNotifs = eligibleStudents
+          .filter((s) => s.userId && s.userId._id)
+          .map((s) => ({
+            userId: s.userId._id,
+            sender: req.user._id,
+            title: `New Opportunity: ${drive.role}`,
+            message: `New campus placement drive approved: "${drive.role}" at ${
+              drive.company?.companyName || drive.companyName || "Partner Company"
+            }. Check your Placement Opportunities!`,
+            type: "drive",
+            targetAudience: "students",
+          }));
+
+        if (studentNotifs.length > 0) {
+          await Notification.insertMany(studentNotifs);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to notify eligible students:", err);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Placement drive for "${drive.role}" approved and published successfully!`,
+      drive,
+    });
+  } catch (error) {
+    console.error("Approve placement drive error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error approving placement drive",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - REJECT PLACEMENT DRIVE
+// ==========================================
+const rejectPlacementDrive = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rejectionReason } = req.body;
+
+    const drive = await PlacementDrive.findById(id).populate("company");
+
+    if (!drive) {
+      return res.status(404).json({
+        success: false,
+        message: "Placement drive not found",
+      });
+    }
+
+    const reason = (
+      rejectionReason || "Criteria or information requires revision"
+    ).trim();
+    drive.status = "Rejected";
+    drive.rejectionReason = reason;
+    await drive.save();
+
+    // Notify company with rejection reason
+    if (drive.company && drive.company.userId) {
+      try {
+        await Notification.create({
+          userId: drive.company.userId,
+          sender: req.user._id,
+          title: `Drive Not Approved: ${drive.role}`,
+          message: `Your placement drive submission for "${drive.role}" was not approved by the Placement Cell. Reason: ${reason}`,
+          type: "drive",
+          targetAudience: "individual",
+        });
+      } catch (err) {
+        console.warn("Failed to notify company of rejection:", err);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Placement drive rejected. Company has been notified with the reason.`,
+      drive,
+    });
+  } catch (error) {
+    console.error("Reject placement drive error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error rejecting placement drive",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - REQUEST CHANGES FROM COMPANY
+// ==========================================
+const requestDriveChanges = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { changeRequests } = req.body;
+
+    const drive = await PlacementDrive.findById(id).populate("company");
+
+    if (!drive) {
+      return res.status(404).json({
+        success: false,
+        message: "Placement drive not found",
+      });
+    }
+
+    const requests = (
+      changeRequests || "Please review and update drive requirements"
+    ).trim();
+    drive.status = "Pending Approval";
+    drive.changeRequests = requests;
+    await drive.save();
+
+    // Notify company
+    if (drive.company && drive.company.userId) {
+      try {
+        await Notification.create({
+          userId: drive.company.userId,
+          sender: req.user._id,
+          title: `Changes Requested: ${drive.role}`,
+          message: `The Placement Cell has requested revisions on your drive "${drive.role}": ${requests}`,
+          type: "drive",
+          targetAudience: "individual",
+        });
+      } catch (err) {
+        console.warn("Failed to notify company of change request:", err);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Change request sent to company successfully.`,
+      drive,
+    });
+  } catch (error) {
+    console.error("Request drive changes error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error requesting drive changes",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - UPDATE PLACEMENT DRIVE DETAILS
+// ==========================================
+const updatePlacementDriveByAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const drive = await PlacementDrive.findById(id);
+
+    if (!drive) {
+      return res.status(404).json({
+        success: false,
+        message: "Placement drive not found",
+      });
+    }
+
+    const {
+      role,
+      package: salaryPackage,
+      jobType,
+      vacancies,
+      experience,
+      description,
+      additionalInstructions,
+      eligibility,
+      skills,
+      selectionProcess,
+      location,
+      driveDate,
+      applicationDeadline,
+      status,
+    } = req.body;
+
+    if (role) drive.role = role.trim();
+    if (salaryPackage) drive.package = salaryPackage.trim();
+    if (jobType) drive.jobType = jobType;
+    if (vacancies) drive.vacancies = String(vacancies).trim();
+    if (experience) drive.experience = experience.trim();
+    if (description !== undefined) drive.description = description.trim();
+    if (additionalInstructions !== undefined)
+      drive.additionalInstructions = additionalInstructions.trim();
+    if (location !== undefined) drive.location = location.trim();
+    if (driveDate) drive.driveDate = new Date(driveDate);
+    if (applicationDeadline)
+      drive.applicationDeadline = new Date(applicationDeadline);
+    if (status) drive.status = status;
+
+    if (eligibility) {
+      if (Array.isArray(eligibility.branches)) {
+        drive.eligibility.branches = eligibility.branches;
+      }
+      if (eligibility.minCGPA !== undefined) {
+        drive.eligibility.minCGPA = Number(eligibility.minCGPA);
+      }
+      if (eligibility.passingYear !== undefined) {
+        drive.eligibility.passingYear = Number(eligibility.passingYear);
+      }
+      if (Array.isArray(eligibility.academicYears)) {
+        drive.eligibility.academicYears = eligibility.academicYears;
+      }
+      if (eligibility.backlogCriteria) {
+        drive.eligibility.backlogCriteria = eligibility.backlogCriteria;
+      }
+      if (eligibility.maxBacklogs !== undefined) {
+        drive.eligibility.maxBacklogs = Number(eligibility.maxBacklogs);
+      }
+    }
+
+    if (skills) {
+      if (Array.isArray(skills)) {
+        drive.skills = skills;
+      } else if (typeof skills === "string") {
+        drive.skills = skills.split(",").map((s) => s.trim()).filter(Boolean);
+      }
+    }
+
+    if (selectionProcess) {
+      if (Array.isArray(selectionProcess)) {
+        drive.selectionProcess = selectionProcess;
+      } else if (typeof selectionProcess === "string") {
+        drive.selectionProcess = selectionProcess
+          .split(",")
+          .map((r) => r.trim())
+          .filter(Boolean);
+      }
+    }
+
+    await drive.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Placement drive details updated successfully.",
+      drive,
+    });
+  } catch (error) {
+    console.error("Update placement drive by admin error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error updating placement drive",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - DELETE PLACEMENT DRIVE
+// ==========================================
+const deletePlacementDriveByAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const drive = await PlacementDrive.findById(id);
+
+    if (!drive) {
+      return res.status(404).json({
+        success: false,
+        message: "Placement drive not found",
+      });
+    }
+
+    // Delete associated applications
+    await Application.deleteMany({ drive: id });
+    await PlacementDrive.findByIdAndDelete(id);
+
+    res.status(200).json({
+      success: true,
+      message: `Placement drive "${drive.role}" and its applications deleted successfully.`,
+    });
+  } catch (error) {
+    console.error("Delete placement drive error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error deleting placement drive",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - PREVIEW ELIGIBLE STUDENTS FOR A DRIVE
+// ==========================================
+const getDriveEligibleStudents = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const drive = await PlacementDrive.findById(id);
+
+    if (!drive) {
+      return res.status(404).json({
+        success: false,
+        message: "Placement drive not found",
+      });
+    }
+
+    const students = await Student.find()
+      .populate("userId", "name email")
+      .lean();
+
+    const matchingStudents = students
+      .map((s) => {
+        const evalRes = evaluateStudentEligibility(s, drive);
+        return {
+          _id: s._id,
+          name: s.userId?.name || "Student",
+          email: s.userId?.email || "N/A",
+          branch: s.branch,
+          cgpa: s.cgpa,
+          academicYear: helperDeriveAcademicYear(
+            s.academicYear,
+            s.graduationYear
+          ),
+          skills: s.skills || [],
+          isEligible: evalRes.isEligible,
+          reasons: evalRes.reasons,
+          ineligibilityReason: evalRes.ineligibilityReason,
+          breakdown: evalRes.breakdown,
+        };
+      })
+      .filter((s) => s.isEligible);
+
+    res.status(200).json({
+      success: true,
+      count: matchingStudents.length,
+      eligibleStudents: matchingStudents,
+    });
+  } catch (error) {
+    console.error("Get drive eligible students error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching eligible students",
       error: error.message,
     });
   }
@@ -2089,6 +2801,13 @@ module.exports = {
   getAdminPlacementDriveDetails,
   getAdminDriveApplicants,
   closePlacementDriveByAdmin,
+  adminCreatePlacementDrive,
+  approvePlacementDrive,
+  rejectPlacementDrive,
+  requestDriveChanges,
+  updatePlacementDriveByAdmin,
+  deletePlacementDriveByAdmin,
+  getDriveEligibleStudents,
   getAllApplications,
   getAdminApplicationDetails,
   shareStudentsWithCompany,

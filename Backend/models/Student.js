@@ -57,6 +57,12 @@ const studentSchema = new mongoose.Schema(
       default: 2027,
     },
 
+    backlogs: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     skills: [
       {
         type: String,
