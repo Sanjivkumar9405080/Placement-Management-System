@@ -21,6 +21,15 @@ import {
   Calendar,
   Layers,
   Sparkles,
+  ExternalLink,
+  Check,
+  X,
+  Send,
+  User,
+  Mail,
+  Phone,
+  DollarSign,
+  Tag,
 } from "lucide-react";
 
 const AdminDashboard = () => {
@@ -28,10 +37,96 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
+
+  // Student Company Suggestions State (Requirement 4)
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionFilter, setSuggestionFilter] = useState("All"); // All | Pending | Approved | Rejected
+  const [reviewModal, setReviewModal] = useState({
+    isOpen: false,
+    suggestion: null,
+    status: "",
+    adminNotes: "",
+    loading: false,
+  });
 
   useEffect(() => {
     fetchDashboardStats();
+    fetchCompanySuggestions();
   }, []);
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(""), 4500);
+  };
+
+  const fetchCompanySuggestions = async () => {
+    try {
+      setSuggestionsLoading(true);
+      const res = await adminAPI.getCompanySuggestions();
+      if (res.data?.success && res.data?.suggestions) {
+        setSuggestions(res.data.suggestions);
+      }
+    } catch (err) {
+      console.error("Fetch company suggestions error:", err);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  const openReviewModal = (suggestion, nextStatus) => {
+    setReviewModal({
+      isOpen: true,
+      suggestion,
+      status: nextStatus,
+      adminNotes:
+        nextStatus === "Approved"
+          ? "Approved by Placement Cell. Corporate outreach initiated."
+          : nextStatus === "Rejected"
+          ? "Not aligned with current placement policy / unverified contact."
+          : "",
+      loading: false,
+    });
+  };
+
+  const handleUpdateSuggestionStatus = async (e) => {
+    e.preventDefault();
+    if (!reviewModal.suggestion || !reviewModal.status) return;
+
+    try {
+      setReviewModal((prev) => ({ ...prev, loading: true }));
+      const res = await adminAPI.updateCompanySuggestionStatus(
+        reviewModal.suggestion._id,
+        reviewModal.status,
+        reviewModal.adminNotes
+      );
+
+      if (res.data?.success) {
+        showToast(
+          `Company suggestion for "${reviewModal.suggestion.companyName}" marked as ${reviewModal.status}!`
+        );
+        setReviewModal({
+          isOpen: false,
+          suggestion: null,
+          status: "",
+          adminNotes: "",
+          loading: false,
+        });
+        fetchCompanySuggestions();
+      } else {
+        alert(res.data?.message || "Failed to update suggestion status.");
+      }
+    } catch (err) {
+      console.error("Update suggestion error:", err);
+      alert(
+        err.response?.data?.message ||
+          "Could not update suggestion status. Please check your admin connection."
+      );
+    } finally {
+      setReviewModal((prev) => ({ ...prev, loading: false }));
+    }
+  };
 
   const fetchDashboardStats = async (isManualRefresh = false) => {
     try {
@@ -579,6 +674,310 @@ const AdminDashboard = () => {
                 </div>
               )}
             </section>
+
+            {/* =========================================================
+                REQUIREMENT 4: STUDENT-SUGGESTED COMPANIES SECTION
+            ========================================================= */}
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Building2 size={18} className="text-blue-600" />
+                    <h2 className="text-base font-bold text-slate-900">
+                      Student-Submitted Company Suggestions
+                    </h2>
+                    {suggestions.filter((s) => s.status === "Pending").length > 0 && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                        {suggestions.filter((s) => s.status === "Pending").length} Pending
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Review and verify company recommendations submitted by students. Approve, reject, or mark pending.
+                  </p>
+                </div>
+
+                {/* Filter Tabs */}
+                <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                  {["All", "Pending", "Approved", "Rejected"].map((tab) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setSuggestionFilter(tab)}
+                      className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
+                        suggestionFilter === tab
+                          ? "bg-slate-900 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {suggestionsLoading ? (
+                <div className="flex h-36 items-center justify-center">
+                  <Loader2 size={24} className="animate-spin text-blue-600" />
+                </div>
+              ) : suggestions.filter((s) =>
+                  suggestionFilter === "All" ? true : s.status === suggestionFilter
+                ).length === 0 ? (
+                <div className="py-10 text-center text-xs text-slate-400">
+                  No company recommendations found for the "{suggestionFilter}" filter.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
+                  {suggestions
+                    .filter((s) =>
+                      suggestionFilter === "All"
+                        ? true
+                        : s.status === suggestionFilter
+                    )
+                    .map((item) => (
+                      <div
+                        key={item._id}
+                        className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4 space-y-3 flex flex-col justify-between hover:bg-white transition shadow-xs"
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h3 className="font-bold text-slate-900 text-sm">
+                                {item.companyName}
+                              </h3>
+                              <p className="text-xs font-semibold text-blue-700 mt-0.5">
+                                {item.jobRole}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                item.status === "Approved"
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  : item.status === "Rejected"
+                                  ? "bg-red-50 text-red-700 border border-red-200"
+                                  : "bg-amber-50 text-amber-700 border border-amber-200"
+                              }`}
+                            >
+                              {item.status}
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-slate-600 space-y-1">
+                            <p>
+                              <strong>HR:</strong> {item.hrName} ({item.hrEmail})
+                            </p>
+                            {item.contactNumber && (
+                              <p>
+                                <strong>Phone:</strong> {item.contactNumber}
+                              </p>
+                            )}
+                            <p>
+                              <strong>Location:</strong> {item.location}
+                            </p>
+                            {item.salaryPackage && (
+                              <p>
+                                <strong>Package:</strong> {item.salaryPackage}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="rounded-xl bg-white border border-slate-200/80 p-2.5 text-xs text-slate-600">
+                            <span className="font-semibold text-slate-700 block mb-0.5 text-[11px]">
+                              Description:
+                            </span>
+                            <p className="line-clamp-3 leading-relaxed">
+                              {item.jobDescription}
+                            </p>
+                          </div>
+
+                          {/* Student Submitter Info */}
+                          <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200">
+                            <span>
+                              Suggested by:{" "}
+                              <strong className="text-slate-700">
+                                {item.studentUser?.name || "Student"}
+                              </strong>{" "}
+                              ({item.student?.branch || "Student"})
+                            </span>
+                          </div>
+
+                          {item.adminNotes && (
+                            <div className="rounded-lg bg-blue-50 p-2 text-[11px] text-blue-900 border border-blue-100">
+                              <strong>Admin Feedback:</strong> {item.adminNotes}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Action Buttons (Requirement 4) */}
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-200/60">
+                          {item.website ? (
+                            <a
+                              href={
+                                item.website.startsWith("http")
+                                  ? item.website
+                                  : `https://${item.website}`
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
+                            >
+                              Website <ExternalLink size={11} />
+                            </a>
+                          ) : (
+                            <span />
+                          )}
+
+                          <div className="flex items-center gap-1.5">
+                            {item.status !== "Approved" && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openReviewModal(item, "Approved")
+                                }
+                                className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700 transition"
+                              >
+                                Approve
+                              </button>
+                            )}
+
+                            {item.status !== "Rejected" && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openReviewModal(item, "Rejected")
+                                }
+                                className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 transition"
+                              >
+                                Reject
+                              </button>
+                            )}
+
+                            {item.status !== "Pending" && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  openReviewModal(item, "Pending")
+                                }
+                                className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100 transition"
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </section>
+
+            {/* Review Company Suggestion Modal (Requirement 4) */}
+            {reviewModal.isOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+                <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Review Company: {reviewModal.suggestion?.companyName}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setReviewModal((prev) => ({ ...prev, isOpen: false }))
+                      }
+                      className="rounded-lg p-1 text-slate-400 hover:text-slate-600"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={handleUpdateSuggestionStatus}
+                    className="p-6 space-y-4"
+                  >
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Updated Review Status *
+                      </label>
+                      <select
+                        value={reviewModal.status}
+                        onChange={(e) =>
+                          setReviewModal((prev) => ({
+                            ...prev,
+                            status: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs font-semibold text-slate-800"
+                      >
+                        <option value="Approved">Approved</option>
+                        <option value="Rejected">Rejected</option>
+                        <option value="Pending">Pending</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Feedback / Notes for the Student *
+                      </label>
+                      <textarea
+                        rows={3}
+                        required
+                        value={reviewModal.adminNotes}
+                        onChange={(e) =>
+                          setReviewModal((prev) => ({
+                            ...prev,
+                            adminNotes: e.target.value,
+                          }))
+                        }
+                        placeholder="Explain approval reason or feedback to the student..."
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-xs text-slate-800 resize-none focus:border-blue-500 focus:bg-white focus:outline-none"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        This feedback note and status will be delivered directly to the submitting student's dashboard.
+                      </p>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setReviewModal((prev) => ({
+                            ...prev,
+                            isOpen: false,
+                          }))
+                        }
+                        className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+
+                      <button
+                        type="submit"
+                        disabled={reviewModal.loading}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {reviewModal.loading ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <Check size={13} />
+                        )}
+                        {reviewModal.loading
+                          ? "Updating..."
+                          : "Save & Notify Student"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* Floating Toast Notification */}
+            {toastMessage && (
+              <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl bg-slate-900 px-4 py-3 text-xs font-semibold text-white shadow-2xl ring-1 ring-white/10 animate-fadeIn">
+                <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                <span>{toastMessage}</span>
+              </div>
+            )}
           </>
         )}
       </main>

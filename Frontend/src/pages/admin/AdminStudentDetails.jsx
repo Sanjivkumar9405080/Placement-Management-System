@@ -25,17 +25,57 @@ import {
   Video,
   MapPin,
   CalendarDays,
+  Share2,
+  Bell,
+  Send,
+  X,
 } from "lucide-react";
 
 const AdminStudentDetails = () => {
   const { id } = useParams();
   const [data, setData] = useState(null);
+  const [companies, setCompanies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [toastMessage, setToastMessage] = useState("");
+
+  // Share modal state
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareCompanyId, setShareCompanyId] = useState("");
+  const [customCompanyName, setCustomCompanyName] = useState("");
+  const [customCompanyEmail, setCustomCompanyEmail] = useState("");
+  const [customHrName, setCustomHrName] = useState("");
+  const [shareSubject, setShareSubject] = useState("");
+  const [shareMessage, setShareMessage] = useState("");
+  const [shareLoading, setShareLoading] = useState(false);
+
+  // Notification modal state
+  const [notifModalOpen, setNotifModalOpen] = useState(false);
+  const [notifTitle, setNotifTitle] = useState("");
+  const [notifMessage, setNotifMessage] = useState("");
+  const [notifType, setNotifType] = useState("general");
+  const [notifLoading, setNotifLoading] = useState(false);
 
   useEffect(() => {
     fetchStudentDetails();
+    fetchCompanies();
   }, [id]);
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(""), 4500);
+  };
+
+  const fetchCompanies = async () => {
+    try {
+      const res = await adminAPI.getCompanies();
+      if (res.data?.success && res.data?.companies) {
+        setCompanies(res.data.companies);
+      }
+    } catch (err) {
+      console.error("Fetch companies error:", err);
+    }
+  };
 
   const fetchStudentDetails = async () => {
     try {
@@ -85,6 +125,105 @@ const AdminStudentDetails = () => {
         return "bg-amber-50 text-amber-700 border-amber-200";
       default:
         return "bg-blue-50 text-blue-700 border-blue-200";
+    }
+  };
+
+  const handleOpenShare = () => {
+    const firstComp = companies[0];
+    setShareCompanyId(firstComp?._id || "");
+    setCustomCompanyName("");
+    setCustomCompanyEmail("");
+    setCustomHrName("");
+    setShareSubject(`Placement Cell - Candidate Profile: ${student?.name}`);
+    setShareMessage(
+      `Dear Recruiter,\n\nPlease find attached the verified candidate profile, skills, and resume for ${student?.name} (${student?.branch}, CGPA: ${student?.cgpa}) recommended by the Placement Cell.\n\nBest regards,\nCampus Placement Cell`
+    );
+    setShareModalOpen(true);
+  };
+
+  const handleShareSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      setShareLoading(true);
+      let compName = customCompanyName;
+      let compEmail = customCompanyEmail;
+      let hr = customHrName;
+
+      if (shareCompanyId && shareCompanyId !== "custom") {
+        const c = companies.find((comp) => comp._id === shareCompanyId);
+        if (c) {
+          compName = c.companyName;
+          compEmail = c.officialEmail || c.email;
+          hr = c.hrName || "";
+        }
+      }
+
+      if (!compEmail) {
+        alert("Please provide a recipient company email address.");
+        setShareLoading(false);
+        return;
+      }
+
+      const res = await adminAPI.shareStudentsWithCompany({
+        companyId: shareCompanyId !== "custom" ? shareCompanyId : null,
+        companyName: compName || "Corporate Partner",
+        companyEmail: compEmail.trim(),
+        hrName: hr ? hr.trim() : "",
+        subject: shareSubject,
+        message: shareMessage,
+        studentIds: [student._id],
+      });
+
+      if (res.data?.success) {
+        showToast(`Profile shared successfully with ${compName || compEmail}!`);
+        setShareModalOpen(false);
+      } else {
+        alert(res.data?.message || "Failed to share student profile.");
+      }
+    } catch (err) {
+      console.error("Share error:", err);
+      alert(err.response?.data?.message || "Failed to share student profile.");
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const handleOpenNotification = () => {
+    setNotifTitle(`Placement Notice for ${student?.name}`);
+    setNotifMessage("");
+    setNotifType("general");
+    setNotifModalOpen(true);
+  };
+
+  const handleNotificationSubmit = async (e) => {
+    e.preventDefault();
+    if (!notifTitle.trim() || !notifMessage.trim()) {
+      alert("Please provide both title and message.");
+      return;
+    }
+    try {
+      setNotifLoading(true);
+      const res = await adminAPI.sendNotification({
+        targetAudience: "student",
+        studentId: student._id,
+        title: notifTitle.trim(),
+        message: notifMessage.trim(),
+        type: notifType,
+      });
+
+      if (res.data?.success) {
+        showToast(`Notification sent to ${student.name}!`);
+        setNotifModalOpen(false);
+        setNotifTitle("");
+        setNotifMessage("");
+      } else {
+        alert(res.data?.message || "Failed to send notification.");
+      }
+    } catch (err) {
+      console.error("Notif error:", err);
+      alert(err.response?.data?.message || "Failed to send notification.");
+    } finally {
+      setNotifLoading(false);
     }
   };
 
@@ -194,13 +333,24 @@ const AdminStudentDetails = () => {
                         {student.graduationYear}
                       </p>
                     </div>
-                    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3.5 py-2 text-center">
-                      <span className="text-[10px] font-semibold uppercase text-slate-400">
-                        Applications
-                      </span>
-                      <p className="text-base font-bold text-slate-800">
-                        {applications.length}
-                      </p>
+                    {/* Admin Action Buttons */}
+                    <div className="flex items-center gap-2 pt-2 sm:pt-0">
+                      <button
+                        type="button"
+                        onClick={handleOpenShare}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition"
+                      >
+                        <Share2 size={13} />
+                        Share with Company
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenNotification}
+                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition"
+                      >
+                        <Bell size={13} className="text-blue-600" />
+                        Notify Student
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -635,6 +785,244 @@ const AdminStudentDetails = () => {
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+        {/* Floating Toast */}
+        {toastMessage && (
+          <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-2xl bg-slate-900 px-4 py-3 text-xs font-semibold text-white shadow-2xl ring-1 ring-white/10 animate-fadeIn">
+            <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
+
+        {/* Share Profile Modal */}
+        {shareModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+            <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                    <Share2 size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Share Profile with Company
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Recommend {student.name} to a recruitment partner
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShareModalOpen(false)}
+                  className="rounded-lg p-1 text-slate-400 hover:text-slate-600"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleShareSubmit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Select Target Company *
+                  </label>
+                  <select
+                    value={shareCompanyId}
+                    onChange={(e) => setShareCompanyId(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-xs font-medium text-slate-800"
+                    required
+                  >
+                    <option value="">-- Choose Registered Company --</option>
+                    {companies.map((c) => (
+                      <option key={c._id} value={c._id}>
+                        {c.companyName} ({c.officialEmail || c.email})
+                      </option>
+                    ))}
+                    <option value="custom">+ Enter Custom Company Details</option>
+                  </select>
+                </div>
+
+                {shareCompanyId === "custom" && (
+                  <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className="col-span-2">
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        Company Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={customCompanyName}
+                        onChange={(e) => setCustomCompanyName(e.target.value)}
+                        placeholder="Company Name"
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        HR Email *
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={customCompanyEmail}
+                        onChange={(e) => setCustomCompanyEmail(e.target.value)}
+                        placeholder="hr@company.com"
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                        HR Name
+                      </label>
+                      <input
+                        type="text"
+                        value={customHrName}
+                        onChange={(e) => setCustomHrName(e.target.value)}
+                        placeholder="HR Contact Person"
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Subject Line *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={shareSubject}
+                    onChange={(e) => setShareSubject(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Message to Recruiter *
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    value={shareMessage}
+                    onChange={(e) => setShareMessage(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-xs resize-none"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShareModalOpen(false)}
+                    className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={shareLoading}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {shareLoading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                    {shareLoading ? "Sharing..." : "Send Profile"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Send Notification Modal */}
+        {notifModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fadeIn">
+            <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl overflow-hidden">
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-6 py-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm">
+                    <Bell size={18} className="text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Send Notification to {student.name}
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Message will be shown on the student's dashboard
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNotifModalOpen(false)}
+                  className="rounded-lg p-1 text-slate-400 hover:text-slate-600"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleNotificationSubmit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Notification Title *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={notifTitle}
+                    onChange={(e) => setNotifTitle(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={notifType}
+                    onChange={(e) => setNotifType(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3 py-2 text-xs"
+                  >
+                    <option value="general">General Notice</option>
+                    <option value="interview">Interview Notification</option>
+                    <option value="drive">Placement Drive Update</option>
+                    <option value="application">Application Update</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Message *
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    value={notifMessage}
+                    onChange={(e) => setNotifMessage(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50/50 p-3 text-xs resize-none"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setNotifModalOpen(false)}
+                    className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={notifLoading}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    {notifLoading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                    {notifLoading ? "Sending..." : "Dispatch Notice"}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

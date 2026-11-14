@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { notificationsAPI } from "../services/api";
 
 const Navbar = () => {
   const { user, logout } = useAuth();
@@ -48,7 +49,36 @@ const Navbar = () => {
 
   const unreadCount = notifications.filter((n) => n.unread).length;
 
-  const markAllAsRead = () => {
+  useEffect(() => {
+    const fetchRealNotifs = async () => {
+      try {
+        const token = localStorage.getItem("token");
+        if (token && user?.role === "student") {
+          const res = await notificationsAPI.getNotifications();
+          if (res.data?.notifications && res.data.notifications.length > 0) {
+            setNotifications(
+              res.data.notifications.map((n) => ({
+                id: n._id,
+                title: n.title || "Placement Notification",
+                desc: n.message,
+                time: new Date(n.createdAt).toLocaleDateString(),
+                unread: !n.isRead,
+                category: n.type || "General",
+              }))
+            );
+          }
+        }
+      } catch (err) {
+        // silent fallback to mock
+      }
+    };
+    fetchRealNotifs();
+  }, [user]);
+
+  const markAllAsRead = async () => {
+    try {
+      await notificationsAPI.markAllAsRead();
+    } catch (err) {}
     setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
   };
 

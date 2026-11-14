@@ -3,13 +3,14 @@ const express = require("express");
 const {
   getMyNotifications,
   markAsRead,
+  markAllAsRead,
+  deleteNotification,
 } = require("../controllers/notificationController");
 
 const { protect } = require("../middleware/authMiddleware");
 const { authorizeRoles } = require("../middleware/roleMiddleware");
 
 const router = express.Router();
-
 
 // Student gets notifications
 router.get(
@@ -19,6 +20,13 @@ router.get(
   getMyNotifications
 );
 
+// Student marks all notifications as read
+router.put(
+  "/read-all",
+  protect,
+  authorizeRoles("student"),
+  markAllAsRead
+);
 
 // Student marks notification as read
 router.put(
@@ -28,5 +36,12 @@ router.put(
   markAsRead
 );
 
+// Student deletes notification
+router.delete(
+  "/:id",
+  protect,
+  authorizeRoles("student"),
+  deleteNotification
+);
 
 module.exports = router;

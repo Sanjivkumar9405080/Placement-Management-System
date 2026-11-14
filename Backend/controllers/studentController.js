@@ -4,6 +4,7 @@ const { Readable } = require("stream");
 const cloudinary = require("cloudinary").v2;
 const Student = require("../models/Student");
 const User = require("../models/User");
+const CompanySuggestion = require("../models/CompanySuggestion");
 
 // Configure Cloudinary if credentials are present
 if (
@@ -108,6 +109,7 @@ const createProfile = async (req, res) => {
       college,
       branch,
       course,
+      academicYear,
       rollNumber,
       cgpa,
       graduationYear,
@@ -123,6 +125,7 @@ const createProfile = async (req, res) => {
       phone: phone || "",
       college: college || "College of Engineering",
       branch: branch || "CSE - AI & ML",
+      academicYear: academicYear || "3rd Year",
       course: course || "B.Tech Computer Science",
       rollNumber: rollNumber || "",
       cgpa: cgpa !== undefined ? Number(cgpa) : 7.0,
@@ -188,6 +191,7 @@ const updateProfile = async (req, res) => {
       college,
       branch,
       course,
+      academicYear,
       rollNumber,
       cgpa,
       graduationYear,
@@ -207,6 +211,7 @@ const updateProfile = async (req, res) => {
     if (phone !== undefined) student.phone = phone;
     if (college !== undefined) student.college = college;
     if (branch !== undefined) student.branch = branch;
+    if (academicYear !== undefined) student.academicYear = academicYear;
     if (course !== undefined) student.course = course;
     if (rollNumber !== undefined) student.rollNumber = rollNumber;
     if (cgpa !== undefined) student.cgpa = Number(cgpa);
@@ -305,10 +310,104 @@ const uploadResume = async (req, res) => {
   }
 };
 
+// Suggest a Company (Student)
+const suggestCompany = async (req, res) => {
+  try {
+    const currentUserId = req.user.userId || req.user._id;
+    const student = await getOrCreateStudent(currentUserId);
+
+    const {
+      companyName,
+      website,
+      hrName,
+      hrEmail,
+      contactNumber,
+      jobRole,
+      jobDescription,
+      location,
+      salaryPackage,
+      additionalInfo,
+    } = req.body;
+
+    // Validate required fields
+    if (
+      !companyName ||
+      !website ||
+      !hrName ||
+      !hrEmail ||
+      !jobRole ||
+      !jobDescription ||
+      !location
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Please fill in all required fields: Company Name, Website, HR Name, HR Email, Job Role, Job Description, and Location.",
+      });
+    }
+
+    const suggestion = await CompanySuggestion.create({
+      student: student._id,
+      studentUser: currentUserId,
+      companyName: companyName.trim(),
+      website: website.trim(),
+      hrName: hrName.trim(),
+      hrEmail: hrEmail.trim(),
+      contactNumber: contactNumber ? contactNumber.trim() : "",
+      jobRole: jobRole.trim(),
+      jobDescription: jobDescription.trim(),
+      location: location.trim(),
+      salaryPackage: salaryPackage ? salaryPackage.trim() : "",
+      additionalInfo: additionalInfo ? additionalInfo.trim() : "",
+      status: "Pending",
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Company recommendation submitted successfully for Admin review!",
+      suggestion,
+    });
+  } catch (error) {
+    console.error("Suggest company error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Get My Suggested Companies (Student)
+const getMySuggestedCompanies = async (req, res) => {
+  try {
+    const currentUserId = req.user.userId || req.user._id;
+    const suggestions = await CompanySuggestion.find({
+      studentUser: currentUserId,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: suggestions.length,
+      suggestions,
+    });
+  } catch (error) {
+    console.error("Get my suggested companies error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createProfile,
   getMyProfile,
   updateProfile,
   uploadResume,
   getOrCreateStudent,
+  suggestCompany,
+  getMySuggestedCompanies,
 };

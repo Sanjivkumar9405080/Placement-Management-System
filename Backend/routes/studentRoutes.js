@@ -5,6 +5,8 @@ const {
   getMyProfile,
   updateProfile,
   uploadResume,
+  suggestCompany,
+  getMySuggestedCompanies,
 } = require("../controllers/studentController");
 
 const {
@@ -51,6 +53,22 @@ router.get(
   protect,
   authorizeRoles("student"),
   getEligibleDrives
+);
+
+// Suggest a company
+router.post(
+  "/suggest-company",
+  protect,
+  authorizeRoles("student"),
+  suggestCompany
+);
+
+// Get my suggested companies
+router.get(
+  "/suggested-companies",
+  protect,
+  authorizeRoles("student"),
+  getMySuggestedCompanies
 );
 
 module.exports = router;

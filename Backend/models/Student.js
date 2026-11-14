@@ -39,6 +39,12 @@ const studentSchema = new mongoose.Schema(
       trim: true,
     },
 
+    academicYear: {
+      type: String,
+      default: "3rd Year",
+      trim: true,
+    },
+
     cgpa: {
       type: Number,
       default: 7.0,

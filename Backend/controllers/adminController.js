@@ -4,6 +4,10 @@ const User = require("../models/User");
 const PlacementDrive = require("../models/PlacementDrive");
 const Application = require("../models/Application");
 const Interview = require("../models/Interview");
+const Notification = require("../models/Notification");
+const CompanySuggestion = require("../models/CompanySuggestion");
+const CompanyShare = require("../models/CompanyShare");
+const AdminNotificationLog = require("../models/AdminNotificationLog");
 
 // ==========================================
 // ADMIN DASHBOARD STATS
@@ -649,11 +653,170 @@ const rejectCompany = async (req, res) => {
 };
 
 // ==========================================
+// HELPERS FOR STUDENT CATEGORIZATION
+// ==========================================
+const deriveAcademicYear = (academicYear, gradYear) => {
+  if (
+    academicYear &&
+    ["1st Year", "2nd Year", "3rd Year", "4th Year"].includes(academicYear)
+  ) {
+    return academicYear;
+  }
+  const yearNum = Number(gradYear);
+  if (!yearNum) return "3rd Year";
+  if (yearNum <= 2026) return "4th Year";
+  if (yearNum === 2027) return "3rd Year";
+  if (yearNum === 2028) return "2nd Year";
+  return "1st Year";
+};
+
+const matchesSkillCategory = (skills, category) => {
+  if (!category || category === "All") return true;
+  if (!skills || !Array.isArray(skills)) return category === "Other Skills";
+
+  const skillLower = skills.map((sk) => String(sk).toLowerCase());
+  const hasSkill = (keywords) =>
+    keywords.some((kw) =>
+      skillLower.some((s) => s.includes(kw.toLowerCase()))
+    );
+
+  switch (category) {
+    case "Full Stack Developer":
+      return hasSkill(["full stack", "fullstack", "mern", "mean"]);
+    case "Frontend Developer":
+      return hasSkill([
+        "frontend",
+        "front-end",
+        "react",
+        "vue",
+        "angular",
+        "html",
+        "css",
+        "next.js",
+        "tailwind",
+      ]);
+    case "Backend Developer":
+      return hasSkill([
+        "backend",
+        "back-end",
+        "node",
+        "express",
+        "django",
+        "spring boot",
+        "fastapi",
+        "flask",
+      ]);
+    case "Java Developer":
+      return hasSkill(["java", "spring", "hibernate", "core java"]);
+    case "Python Developer":
+      return hasSkill(["python", "django", "flask", "fastapi", "pandas"]);
+    case "AI/ML Developer":
+      return hasSkill([
+        "ai/ml",
+        "ai / ml",
+        "ai",
+        "machine learning",
+        "deep learning",
+        "pytorch",
+        "tensorflow",
+        "nlp",
+        "data science",
+      ]);
+    case "Data Analyst":
+      return hasSkill([
+        "data analyst",
+        "data analytics",
+        "data analysis",
+        "powerbi",
+        "power bi",
+        "tableau",
+        "sql",
+      ]);
+    case "Other Skills": {
+      const known = [
+        "full stack",
+        "fullstack",
+        "mern",
+        "mean",
+        "frontend",
+        "front-end",
+        "react",
+        "vue",
+        "angular",
+        "html",
+        "css",
+        "backend",
+        "back-end",
+        "node",
+        "express",
+        "django",
+        "spring boot",
+        "java",
+        "python",
+        "ai",
+        "ml",
+        "machine learning",
+        "deep learning",
+        "data analyst",
+        "powerbi",
+        "tableau",
+      ];
+      return !hasSkill(known) || skills.length === 0;
+    }
+    default:
+      return hasSkill([category]);
+  }
+};
+
+const matchesBranchCategory = (studentBranch, branchFilter) => {
+  if (!branchFilter || branchFilter === "All") return true;
+  if (!studentBranch) return branchFilter === "Other Branches";
+
+  const b = studentBranch.trim().toLowerCase();
+  switch (branchFilter) {
+    case "Computer Science":
+      return (
+        (b.includes("computer science") || b.includes("cse")) &&
+        !b.includes("ai") &&
+        !b.includes("ml")
+      );
+    case "CSE AI & ML":
+      return (
+        b.includes("ai & ml") ||
+        b.includes("ai/ml") ||
+        b.includes("ai and ml") ||
+        b.includes("artificial intelligence")
+      );
+    case "IT":
+      return b === "it" || b.includes("information technology");
+    case "Other Branches":
+      return (
+        !b.includes("computer science") &&
+        !b.includes("cse") &&
+        !b.includes("ai") &&
+        !b.includes("ml") &&
+        b !== "it" &&
+        !b.includes("information technology")
+      );
+    default:
+      return b === branchFilter.toLowerCase();
+  }
+};
+
+// ==========================================
 // ADMIN - GET ALL REGISTERED STUDENTS
 // ==========================================
 const getAllStudents = async (req, res) => {
   try {
-    const { search, branch, passingYear, minCgpa, maxCgpa } = req.query;
+    const {
+      search,
+      branch,
+      skillCategory,
+      academicYear,
+      passingYear,
+      minCgpa,
+      maxCgpa,
+    } = req.query;
 
     // 1. Fetch all students with populated user
     let students = await Student.find()
@@ -678,27 +841,83 @@ const getAllStudents = async (req, res) => {
       }
     });
 
-    // 3. Attach applicationCount and profileStatus ("Active")
-    let studentList = students.map((s) => ({
-      _id: s._id,
-      name: s.userId?.name || "Student",
-      email: s.userId?.email || "N/A",
-      phone: s.phone || "N/A",
-      branch: s.branch || "General",
-      course: s.course || "B.Tech Computer Science",
-      college: s.college || "College of Engineering",
-      rollNumber: s.rollNumber || "N/A",
-      graduationYear: s.graduationYear || 2027,
-      cgpa: s.cgpa !== undefined ? s.cgpa : 7.0,
-      skills: s.skills || [],
-      resume: s.resume || "",
-      resumeOriginalName: s.resumeOriginalName || "",
-      applicationsCount: appCountMap[s._id.toString()] || 0,
-      profileStatus: "Active",
-      createdAt: s.createdAt,
-    }));
+    // 3. Map students with academicYear, rollNumber, and profile details
+    let studentList = students.map((s) => {
+      const year = deriveAcademicYear(s.academicYear, s.graduationYear);
+      return {
+        _id: s._id,
+        userId: s.userId?._id,
+        name: s.userId?.name || "Student",
+        email: s.userId?.email || "N/A",
+        phone: s.phone || "N/A",
+        branch: s.branch || "General",
+        course: s.course || "B.Tech Computer Science",
+        college: s.college || "College of Engineering",
+        rollNumber: s.rollNumber || "N/A",
+        graduationYear: s.graduationYear || 2027,
+        academicYear: year,
+        cgpa: s.cgpa !== undefined ? s.cgpa : 7.0,
+        skills: s.skills || [],
+        resume: s.resume || "",
+        resumeOriginalName: s.resumeOriginalName || "",
+        achievements: s.achievements || [],
+        projects: s.projects || [],
+        professionalLinks: s.professionalLinks || [],
+        applicationsCount: appCountMap[s._id.toString()] || 0,
+        profileStatus: "Active",
+        createdAt: s.createdAt,
+      };
+    });
 
-    // Extract unique available branches and passing years from all students for dynamic filter dropdowns
+    // Compute dynamic categorization counts across all students
+    const skillCategoryCounts = {
+      "Full Stack Developer": studentList.filter((s) =>
+        matchesSkillCategory(s.skills, "Full Stack Developer")
+      ).length,
+      "Frontend Developer": studentList.filter((s) =>
+        matchesSkillCategory(s.skills, "Frontend Developer")
+      ).length,
+      "Backend Developer": studentList.filter((s) =>
+        matchesSkillCategory(s.skills, "Backend Developer")
+      ).length,
+      "Java Developer": studentList.filter((s) =>
+        matchesSkillCategory(s.skills, "Java Developer")
+      ).length,
+      "Python Developer": studentList.filter((s) =>
+        matchesSkillCategory(s.skills, "Python Developer")
+      ).length,
+      "AI/ML Developer": studentList.filter((s) =>
+        matchesSkillCategory(s.skills, "AI/ML Developer")
+      ).length,
+      "Data Analyst": studentList.filter((s) =>
+        matchesSkillCategory(s.skills, "Data Analyst")
+      ).length,
+      "Other Skills": studentList.filter((s) =>
+        matchesSkillCategory(s.skills, "Other Skills")
+      ).length,
+    };
+
+    const academicYearCounts = {
+      "1st Year": studentList.filter((s) => s.academicYear === "1st Year").length,
+      "2nd Year": studentList.filter((s) => s.academicYear === "2nd Year").length,
+      "3rd Year": studentList.filter((s) => s.academicYear === "3rd Year").length,
+      "4th Year": studentList.filter((s) => s.academicYear === "4th Year").length,
+    };
+
+    const branchCounts = {
+      "Computer Science": studentList.filter((s) =>
+        matchesBranchCategory(s.branch, "Computer Science")
+      ).length,
+      "CSE AI & ML": studentList.filter((s) =>
+        matchesBranchCategory(s.branch, "CSE AI & ML")
+      ).length,
+      IT: studentList.filter((s) => matchesBranchCategory(s.branch, "IT")).length,
+      "Other Branches": studentList.filter((s) =>
+        matchesBranchCategory(s.branch, "Other Branches")
+      ).length,
+    };
+
+    // Extract unique available branches and passing years for dropdowns
     const availableBranches = Array.from(
       new Set(students.map((s) => s.branch).filter(Boolean))
     );
@@ -706,20 +925,45 @@ const getAllStudents = async (req, res) => {
       new Set(students.map((s) => s.graduationYear).filter(Boolean))
     ).sort((a, b) => a - b);
 
-    // 4. Server-side filter support if query params provided
+    // 4. Server-side filter support (supporting combining multiple filters)
     if (search) {
       const q = search.trim().toLowerCase();
-      studentList = studentList.filter(
-        (s) =>
-          s.name.toLowerCase().includes(q) ||
-          s.email.toLowerCase().includes(q) ||
-          (s.phone && s.phone.toLowerCase().includes(q))
+      studentList = studentList.filter((s) => {
+        const matchName = s.name.toLowerCase().includes(q);
+        const matchEmail = s.email.toLowerCase().includes(q);
+        const matchPhone = s.phone && s.phone.toLowerCase().includes(q);
+        const matchRoll = s.rollNumber && s.rollNumber.toLowerCase().includes(q);
+        const matchBranch = s.branch && s.branch.toLowerCase().includes(q);
+        const matchYear =
+          (s.academicYear && s.academicYear.toLowerCase().includes(q)) ||
+          String(s.graduationYear).includes(q);
+        const matchSkills =
+          s.skills && s.skills.some((sk) => sk.toLowerCase().includes(q));
+        return (
+          matchName ||
+          matchEmail ||
+          matchPhone ||
+          matchRoll ||
+          matchBranch ||
+          matchYear ||
+          matchSkills
+        );
+      });
+    }
+
+    if (skillCategory && skillCategory !== "All") {
+      studentList = studentList.filter((s) =>
+        matchesSkillCategory(s.skills, skillCategory)
       );
     }
 
+    if (academicYear && academicYear !== "All") {
+      studentList = studentList.filter((s) => s.academicYear === academicYear);
+    }
+
     if (branch && branch !== "All") {
-      studentList = studentList.filter(
-        (s) => s.branch.toLowerCase() === branch.toLowerCase()
+      studentList = studentList.filter((s) =>
+        matchesBranchCategory(s.branch, branch)
       );
     }
 
@@ -743,6 +987,9 @@ const getAllStudents = async (req, res) => {
       total: studentList.length,
       availableBranches,
       availablePassingYears,
+      skillCategoryCounts,
+      academicYearCounts,
+      branchCounts,
     });
   } catch (error) {
     console.error("Get all students error:", error);
@@ -806,6 +1053,10 @@ const getStudentDetails = async (req, res) => {
         rollNumber: student.rollNumber || "N/A",
         cgpa: student.cgpa !== undefined ? student.cgpa : 7.0,
         graduationYear: student.graduationYear || 2027,
+        academicYear: deriveAcademicYear(
+          student.academicYear,
+          student.graduationYear
+        ),
         skills: student.skills || [],
         resume: student.resume || "",
         resumeOriginalName: student.resumeOriginalName || "",
@@ -1446,6 +1697,382 @@ const getAdminApplicationDetails = async (req, res) => {
   }
 };
 
+// ==========================================
+// ADMIN - SHARE STUDENTS WITH COMPANY
+// ==========================================
+const shareStudentsWithCompany = async (req, res) => {
+  try {
+    const {
+      companyId,
+      companyName,
+      companyEmail,
+      hrName,
+      subject,
+      message,
+      studentIds,
+    } = req.body;
+
+    if (!companyEmail || !studentIds || !Array.isArray(studentIds) || studentIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please specify a company email and select at least one student profile.",
+      });
+    }
+
+    // Verify students exist
+    const students = await Student.find({ _id: { $in: studentIds } })
+      .populate("userId", "name email")
+      .lean();
+
+    if (students.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No valid students found to share.",
+      });
+    }
+
+    const shareRecord = await CompanyShare.create({
+      company: companyId || null,
+      companyName: companyName || "Company Partner",
+      companyEmail: companyEmail.trim().toLowerCase(),
+      hrName: hrName ? hrName.trim() : "",
+      subject: subject ? subject.trim() : `Student Profiles Dispatch - ${companyName || "Placement Cell"}`,
+      message: message ? message.trim() : "Please review the attached student profiles and resumes.",
+      students: studentIds,
+      sharedBy: req.user._id || req.user.userId,
+      status: "Sent",
+      deliveryNotes: `Successfully dispatched ${students.length} student candidate dossier(s) via Placement Cell.`,
+    });
+
+    // If company is registered with user, deliver in-app notification to company
+    if (companyId) {
+      const companyDoc = await Company.findById(companyId);
+      if (companyDoc && companyDoc.userId) {
+        await Notification.create({
+          userId: companyDoc.userId,
+          title: "New Candidate Profiles Shared",
+          message: `The Placement Cell has recommended and shared ${students.length} student profile(s) with your organization.`,
+          type: "general",
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully shared ${students.length} student profile(s) with ${companyName || companyEmail}!`,
+      share: shareRecord,
+      sharedCount: students.length,
+    });
+  } catch (error) {
+    console.error("Share students with company error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to share student profiles",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - GET SHARED PROFILES HISTORY
+// ==========================================
+const getSharedProfilesHistory = async (req, res) => {
+  try {
+    const shares = await CompanyShare.find()
+      .populate("company", "companyName logo location industry officialEmail hrName")
+      .populate({
+        path: "students",
+        populate: { path: "userId", select: "name email" },
+      })
+      .populate("sharedBy", "name email")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: shares.length,
+      shares,
+    });
+  } catch (error) {
+    console.error("Get shared profiles history error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error retrieving share history",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - BROADCAST / TARGETED NOTIFICATIONS
+// ==========================================
+const sendAdminNotification = async (req, res) => {
+  try {
+    const {
+      title,
+      message,
+      type = "general",
+      targetAudience, // "all" | "student" | "selected" | "year" | "skill"
+      studentId,
+      studentIds,
+      academicYear,
+      skillCategory,
+    } = req.body;
+
+    if (!title || !message) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter both a title and notification message.",
+      });
+    }
+
+    let recipientUserIds = [];
+    let targetCriteria = "All Students";
+
+    if (targetAudience === "student" && studentId) {
+      const student = await Student.findById(studentId);
+      if (student && student.userId) {
+        recipientUserIds = [student.userId];
+        const studentUser = await User.findById(student.userId);
+        targetCriteria = `Student: ${studentUser?.name || "Individual Student"}`;
+      }
+    } else if (
+      targetAudience === "selected" &&
+      Array.isArray(studentIds) &&
+      studentIds.length > 0
+    ) {
+      const students = await Student.find({ _id: { $in: studentIds } }).select("userId");
+      recipientUserIds = students.map((s) => s.userId).filter(Boolean);
+      targetCriteria = `Selected Students (${recipientUserIds.length})`;
+    } else if (targetAudience === "year" && academicYear) {
+      targetCriteria = `Academic Year: ${academicYear}`;
+      const allStudents = await Student.find().select("userId academicYear graduationYear");
+      recipientUserIds = allStudents
+        .filter((s) => deriveAcademicYear(s.academicYear, s.graduationYear) === academicYear)
+        .map((s) => s.userId)
+        .filter(Boolean);
+    } else if (targetAudience === "skill" && skillCategory) {
+      targetCriteria = `Technical Skill: ${skillCategory}`;
+      const allStudents = await Student.find().select("userId skills");
+      recipientUserIds = allStudents
+        .filter((s) => matchesSkillCategory(s.skills, skillCategory))
+        .map((s) => s.userId)
+        .filter(Boolean);
+    } else {
+      // "all" students
+      targetCriteria = "All Registered Students";
+      const students = await Student.find().select("userId");
+      recipientUserIds = students.map((s) => s.userId).filter(Boolean);
+    }
+
+    if (recipientUserIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No students found matching your selected audience criteria.",
+      });
+    }
+
+    // Deduplicate user IDs
+    const uniqueUserIds = Array.from(
+      new Set(recipientUserIds.map((id) => id.toString()))
+    );
+
+    // Bulk insert notifications
+    const notificationDocs = uniqueUserIds.map((userId) => ({
+      userId,
+      title: title.trim(),
+      message: message.trim(),
+      type: ["application", "schedule", "general", "interview", "drive"].includes(type)
+        ? type
+        : "general",
+      targetAudience: targetAudience || "all",
+      targetCriteria,
+      sender: req.user._id || req.user.userId,
+      isRead: false,
+    }));
+
+    await Notification.insertMany(notificationDocs);
+
+    // Log broadcast
+    const log = await AdminNotificationLog.create({
+      title: title.trim(),
+      message: message.trim(),
+      type: type || "general",
+      targetAudience: targetAudience || "all",
+      targetCriteria,
+      recipientsCount: uniqueUserIds.length,
+      sentBy: req.user._id || req.user.userId,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Notification sent successfully to ${uniqueUserIds.length} student(s)!`,
+      recipientsCount: uniqueUserIds.length,
+      log,
+    });
+  } catch (error) {
+    console.error("Send admin notification error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to dispatch notifications",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - GET NOTIFICATION HISTORY
+// ==========================================
+const getAdminNotificationHistory = async (req, res) => {
+  try {
+    const history = await AdminNotificationLog.find()
+      .populate("sentBy", "name email")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: history.length,
+      history,
+    });
+  } catch (error) {
+    console.error("Get admin notification history error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - DELETE NOTIFICATION HISTORY ITEM
+// ==========================================
+const deleteAdminNotificationHistory = async (req, res) => {
+  try {
+    await AdminNotificationLog.findByIdAndDelete(req.params.id);
+    res.status(200).json({
+      success: true,
+      message: "Notification log removed",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - GET STUDENT COMPANY SUGGESTIONS
+// ==========================================
+const getCompanySuggestions = async (req, res) => {
+  try {
+    const { status, search } = req.query;
+    let filter = {};
+    if (status && status !== "All") {
+      filter.status = status;
+    }
+
+    let suggestions = await CompanySuggestion.find(filter)
+      .populate({
+        path: "student",
+        select: "branch course graduationYear cgpa rollNumber academicYear",
+      })
+      .populate("studentUser", "name email")
+      .populate("reviewedBy", "name email")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (search) {
+      const q = search.trim().toLowerCase();
+      suggestions = suggestions.filter(
+        (s) =>
+          s.companyName.toLowerCase().includes(q) ||
+          s.jobRole.toLowerCase().includes(q) ||
+          s.hrName.toLowerCase().includes(q) ||
+          s.hrEmail.toLowerCase().includes(q) ||
+          s.location.toLowerCase().includes(q) ||
+          (s.studentUser?.name && s.studentUser.name.toLowerCase().includes(q))
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      count: suggestions.length,
+      suggestions,
+    });
+  } catch (error) {
+    console.error("Get company suggestions error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// ==========================================
+// ADMIN - REVIEW / UPDATE COMPANY SUGGESTION STATUS
+// ==========================================
+const updateCompanySuggestionStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, adminNotes } = req.body;
+
+    if (!["Pending", "Approved", "Rejected"].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Status must be Pending, Approved, or Rejected.",
+      });
+    }
+
+    const suggestion = await CompanySuggestion.findById(id);
+    if (!suggestion) {
+      return res.status(404).json({
+        success: false,
+        message: "Company suggestion not found",
+      });
+    }
+
+    suggestion.status = status;
+    if (adminNotes !== undefined) suggestion.adminNotes = adminNotes;
+    suggestion.reviewedBy = req.user._id || req.user.userId;
+    suggestion.reviewedAt = new Date();
+
+    await suggestion.save();
+
+    // Send notification to the recommending student
+    if (suggestion.studentUser) {
+      let notifMessage = `Your company suggestion for "${suggestion.companyName}" (${suggestion.jobRole}) has been reviewed by the Placement Cell. Status: ${status}.`;
+      if (adminNotes) {
+        notifMessage += ` Admin Note: ${adminNotes}`;
+      }
+
+      await Notification.create({
+        userId: suggestion.studentUser,
+        title: `Company Suggestion ${status}`,
+        message: notifMessage,
+        type: "general",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Company recommendation marked as ${status}!`,
+      suggestion,
+    });
+  } catch (error) {
+    console.error("Update company suggestion status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAdminDashboardStats,
   getAdminProfile,
@@ -1464,4 +2091,11 @@ module.exports = {
   closePlacementDriveByAdmin,
   getAllApplications,
   getAdminApplicationDetails,
+  shareStudentsWithCompany,
+  getSharedProfilesHistory,
+  sendAdminNotification,
+  getAdminNotificationHistory,
+  deleteAdminNotificationHistory,
+  getCompanySuggestions,
+  updateCompanySuggestionStatus,
 };

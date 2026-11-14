@@ -72,6 +72,16 @@ export const studentAPI = {
       headers: { "Content-Type": "multipart/form-data" },
     }),
   getEligibleDrives: () => api.get("/students/eligible-drives"),
+  suggestCompany: (data) => api.post("/students/suggest-company", data),
+  getMySuggestedCompanies: () => api.get("/students/suggested-companies"),
+};
+
+// Notification API helpers
+export const notificationsAPI = {
+  getNotifications: () => api.get("/notifications"),
+  markAsRead: (id) => api.put(`/notifications/${id}/read`),
+  markAllAsRead: () => api.put("/notifications/read-all"),
+  deleteNotification: (id) => api.delete(`/notifications/${id}`),
 };
 
 // Admin API helpers
@@ -99,6 +109,19 @@ export const adminAPI = {
   getApplications: (params) => api.get("/admin/applications", { params }),
   getAdminApplicationDetails: (id) => api.get(`/admin/applications/${id}`),
   getProfile: () => api.get("/admin/profile"),
+  // Student Profile Sharing with Companies
+  shareStudentsWithCompany: (data) => api.post("/admin/share-students", data),
+  getSharedProfilesHistory: () => api.get("/admin/shared-profiles"),
+  // Admin Notifications
+  sendNotification: (data) => api.post("/admin/notifications", data),
+  getNotificationHistory: () => api.get("/admin/notifications/history"),
+  deleteNotificationHistory: (id) =>
+    api.delete(`/admin/notifications/history/${id}`),
+  // Company Suggestions
+  getCompanySuggestions: (params) =>
+    api.get("/admin/company-suggestions", { params }),
+  updateCompanySuggestionStatus: (id, status, adminNotes) =>
+    api.put(`/admin/company-suggestions/${id}/status`, { status, adminNotes }),
 };
 
 export default api;

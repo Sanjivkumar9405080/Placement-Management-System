@@ -17,6 +17,13 @@ const {
   closePlacementDriveByAdmin,
   getAllApplications,
   getAdminApplicationDetails,
+  shareStudentsWithCompany,
+  getSharedProfilesHistory,
+  sendAdminNotification,
+  getAdminNotificationHistory,
+  deleteAdminNotificationHistory,
+  getCompanySuggestions,
+  updateCompanySuggestionStatus,
 } = require("../controllers/adminController");
 
 const { protect } = require("../middleware/authMiddleware");
@@ -150,6 +157,62 @@ router.get(
   protect,
   authorizeRoles("admin"),
   getAdminApplicationDetails
+);
+
+// Share student profiles and resumes with a company
+router.post(
+  "/share-students",
+  protect,
+  authorizeRoles("admin"),
+  shareStudentsWithCompany
+);
+
+// Get shared student profiles history
+router.get(
+  "/shared-profiles",
+  protect,
+  authorizeRoles("admin"),
+  getSharedProfilesHistory
+);
+
+// Send admin notifications (to all, selected, single student, year, or skill)
+router.post(
+  "/notifications",
+  protect,
+  authorizeRoles("admin"),
+  sendAdminNotification
+);
+
+// Get admin notification history
+router.get(
+  "/notifications/history",
+  protect,
+  authorizeRoles("admin"),
+  getAdminNotificationHistory
+);
+
+// Delete notification history log
+router.delete(
+  "/notifications/history/:id",
+  protect,
+  authorizeRoles("admin"),
+  deleteAdminNotificationHistory
+);
+
+// Get all student-submitted company suggestions
+router.get(
+  "/company-suggestions",
+  protect,
+  authorizeRoles("admin"),
+  getCompanySuggestions
+);
+
+// Update company suggestion status (Approve / Reject / Pending)
+router.put(
+  "/company-suggestions/:id/status",
+  protect,
+  authorizeRoles("admin"),
+  updateCompanySuggestionStatus
 );
 
 module.exports = router;

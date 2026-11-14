@@ -16,11 +16,12 @@ const SKILL_SUGGESTIONS = [
   "Full Stack Developer",
   "Frontend Developer",
   "Backend Developer",
+  "Java Developer",
+  "Python Developer",
+  "AI/ML Developer",
   "Data Analyst",
   "Data Scientist",
   "AI / ML",
-  "Java Developer",
-  "Python Developer",
   "DevOps",
   "Cloud Computing",
   "UI / UX",
@@ -50,6 +51,7 @@ const StudentProfile = () => {
     rollNumber: "",
     course: "B.Tech Computer Science",
     branch: "CSE - AI & ML",
+    academicYear: "3rd Year",
     graduationYear: "2027",
     cgpa: "7.0",
   });
@@ -160,6 +162,7 @@ const StudentProfile = () => {
           rollNumber: s.rollNumber || "",
           course: s.course || "B.Tech Computer Science",
           branch: s.branch || "CSE - AI & ML",
+          academicYear: s.academicYear || "3rd Year",
           graduationYear: s.graduationYear ? String(s.graduationYear) : "2027",
           cgpa: s.cgpa !== undefined ? String(s.cgpa) : "7.0",
         });
@@ -225,6 +228,7 @@ const StudentProfile = () => {
         rollNumber: profile.rollNumber,
         course: profile.course,
         branch: profile.branch,
+        academicYear: profile.academicYear || "3rd Year",
         graduationYear: Number(profile.graduationYear) || 2027,
         cgpa: Number(profile.cgpa) || 7.0,
         skills: selectedSkills,
@@ -660,6 +664,29 @@ const StudentProfile = () => {
                   isEditing={isEditing}
                   onChange={handleProfileChange}
                 />
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-500">
+                    Academic Year
+                  </label>
+                  {isEditing ? (
+                    <select
+                      name="academicYear"
+                      value={profile.academicYear || "3rd Year"}
+                      onChange={handleProfileChange}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="1st Year">1st Year</option>
+                      <option value="2nd Year">2nd Year</option>
+                      <option value="3rd Year">3rd Year</option>
+                      <option value="4th Year">4th Year</option>
+                    </select>
+                  ) : (
+                    <p className="py-2 text-xs font-bold text-indigo-700">
+                      {profile.academicYear || "3rd Year"}
+                    </p>
+                  )}
+                </div>
 
                 <ProfileField
                   label="Graduation Year"
