@@ -1,63 +1,62 @@
-const fs = require("fs");
-const path = require("path");
 const { Readable } = require("stream");
-const cloudinary = require("cloudinary").v2;
+const cloudinary = require("../config/cloudinary");
 const Student = require("../models/Student");
 const User = require("../models/User");
 const CompanySuggestion = require("../models/CompanySuggestion");
 
-// Configure Cloudinary if credentials are present
-if (
-  process.env.CLOUDINARY_CLOUD_NAME &&
-  process.env.CLOUDINARY_API_KEY &&
-  process.env.CLOUDINARY_API_SECRET
-) {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-  });
-}
+// Ensure Cloudinary is configured with environment variables
+const ensureCloudinaryConfig = () => {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+  const apiKey = process.env.CLOUDINARY_API_KEY;
+  const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
-// Helper: Upload buffer to Cloudinary
+  if (!cloudName || !apiKey || !apiSecret) {
+    throw new Error(
+      "Cloudinary credentials are not configured. Please ensure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET are set in environment variables."
+    );
+  }
+
+  cloudinary.config({
+    cloud_name: cloudName,
+    api_key: apiKey,
+    api_secret: apiSecret,
+  });
+};
+
+// Helper: Upload buffer to Cloudinary using raw resource type for PDF
 const uploadBufferToCloudinary = (buffer, originalname) => {
+  ensureCloudinaryConfig();
+
   return new Promise((resolve, reject) => {
-    const cleanName = (originalname || "resume")
-      .replace(/\.[^/.]+$/, "")
-      .replace(/[^a-zA-Z0-9]/g, "_");
+    const rawBaseName = (originalname || "resume")
+      .replace(/\.pdf$/i, "")
+      .replace(/[^a-zA-Z0-9_-]/g, "_");
+    const uniqueFileName = `${Date.now()}_${rawBaseName}.pdf`;
 
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         folder: "placement_resumes",
-        resource_type: "auto",
-        public_id: `${Date.now()}_${cleanName}`,
+        resource_type: "raw",
+        public_id: uniqueFileName,
       },
       (error, result) => {
-        if (error) return reject(error);
-        resolve(result?.secure_url || result?.url);
+        if (error) {
+          return reject(error);
+        }
+        if (!result || (!result.secure_url && !result.url)) {
+          return reject(
+            new Error("Cloudinary did not return a valid file URL.")
+          );
+        }
+        resolve({
+          secure_url: result.secure_url || result.url,
+          public_id: result.public_id,
+        });
       }
     );
 
     Readable.from(buffer).pipe(uploadStream);
   });
-};
-
-// Helper: Save buffer locally as fallback
-const saveBufferLocally = (buffer, originalname) => {
-  const uploadsDir = path.join(__dirname, "..", "uploads", "resumes");
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
-
-  const cleanName = (originalname || "resume.pdf").replace(
-    /[^a-zA-Z0-9.-]/g,
-    "_"
-  );
-  const fileName = `${Date.now()}-${cleanName}`;
-  const filePath = path.join(uploadsDir, fileName);
-
-  fs.writeFileSync(filePath, buffer);
-  return `http://localhost:5000/uploads/resumes/${fileName}`;
 };
 
 // Helper: Get or create student for user (Self-Healing)
@@ -132,6 +131,8 @@ const createProfile = async (req, res) => {
       graduationYear: graduationYear ? Number(graduationYear) : 2027,
       skills: Array.isArray(skills) ? skills : [],
       resume: resume || "",
+      resumeOriginalName: req.body.resumeOriginalName || "",
+      resumePublicId: req.body.resumePublicId || "",
       achievements: Array.isArray(achievements) ? achievements : [],
       projects: Array.isArray(projects) ? projects : [],
       professionalLinks: Array.isArray(professionalLinks)
@@ -221,6 +222,8 @@ const updateProfile = async (req, res) => {
     if (resume !== undefined) student.resume = resume;
     if (resumeOriginalName !== undefined)
       student.resumeOriginalName = resumeOriginalName;
+    if (req.body.resumePublicId !== undefined)
+      student.resumePublicId = req.body.resumePublicId;
     if (achievements !== undefined) student.achievements = achievements;
     if (projects !== undefined) student.projects = projects;
     if (professionalLinks !== undefined)
@@ -258,35 +261,66 @@ const uploadResume = async (req, res) => {
       });
     }
 
+    // Validate PDF mime type and extension
+    const isPdfMime = req.file.mimetype === "application/pdf";
+    const isPdfExt =
+      req.file.originalname &&
+      req.file.originalname.toLowerCase().endsWith(".pdf");
+
+    if (!isPdfMime && !isPdfExt) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Only PDF files are allowed. Please upload a valid PDF document.",
+      });
+    }
+
+    // Validate file size (5MB max)
+    if (req.file.size > 5 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        message: "Resume size should be less than 5 MB.",
+      });
+    }
+
     const currentUserId = req.user.userId || req.user._id;
     const student = await getOrCreateStudent(currentUserId);
 
-    let resumeUrl = "";
-
-    // 1. Try Cloudinary first
+    // Upload from memory buffer to Cloudinary with raw resource type
+    let uploadResult;
     try {
-      if (
-        process.env.CLOUDINARY_CLOUD_NAME &&
-        process.env.CLOUDINARY_API_KEY &&
-        process.env.CLOUDINARY_API_SECRET
-      ) {
-        resumeUrl = await uploadBufferToCloudinary(
-          req.file.buffer,
-          req.file.originalname
+      uploadResult = await uploadBufferToCloudinary(
+        req.file.buffer,
+        req.file.originalname
+      );
+    } catch (cloudErr) {
+      console.error("Cloudinary upload failed:", cloudErr);
+      return res.status(502).json({
+        success: false,
+        message: `Failed to upload resume to Cloudinary: ${
+          cloudErr.message || "Upload error"
+        }`,
+      });
+    }
+
+    // If student had a previous resume public_id, attempt cleanup in Cloudinary
+    if (student.resumePublicId) {
+      try {
+        await cloudinary.uploader.destroy(student.resumePublicId, {
+          resource_type: "raw",
+        });
+      } catch (delErr) {
+        console.warn(
+          "Could not remove previous Cloudinary resume:",
+          delErr.message
         );
       }
-    } catch (cloudErr) {
-      console.warn("Cloudinary upload failed, falling back to local disk:", cloudErr.message);
     }
 
-    // 2. Fall back to local disk storage if Cloudinary not used or failed
-    if (!resumeUrl) {
-      resumeUrl = saveBufferLocally(req.file.buffer, req.file.originalname);
-    }
-
-    // 3. Update student model
-    student.resume = resumeUrl;
+    // Store returned secure_url and public_id in the Student MongoDB document
+    student.resume = uploadResult.secure_url;
     student.resumeOriginalName = req.file.originalname;
+    student.resumePublicId = uploadResult.public_id;
     await student.save();
 
     const updatedStudent = await Student.findById(student._id).populate(
@@ -297,8 +331,9 @@ const uploadResume = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Resume uploaded successfully!",
-      resume: resumeUrl,
+      resume: uploadResult.secure_url,
       resumeOriginalName: req.file.originalname,
+      resumePublicId: uploadResult.public_id,
       student: updatedStudent,
     });
   } catch (error) {

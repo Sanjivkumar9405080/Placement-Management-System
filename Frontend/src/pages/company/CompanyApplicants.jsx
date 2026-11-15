@@ -52,6 +52,15 @@ const CompanyApplicants = () => {
     app: null,
   });
 
+  const getResumeUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    const baseUrl = (
+      import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api"
+    ).replace(/\/api\/?$/, "");
+    return `${baseUrl}/uploads/resumes/${url}`;
+  };
+
   useEffect(() => {
     fetchApplications();
   }, []);
@@ -679,7 +688,7 @@ const CompanyApplicants = () => {
                             {/* Resume Download / View */}
                             {student.resume ? (
                               <a
-                                href={student.resume}
+                                href={getResumeUrl(student.resume)}
                                 target="_blank"
                                 rel="noreferrer"
                                 title="Open Candidate Resume"
@@ -820,7 +829,7 @@ const CompanyApplicants = () => {
 
                 {profileModal.app.student?.resume ? (
                   <a
-                    href={profileModal.app.student.resume}
+                    href={getResumeUrl(profileModal.app.student.resume)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white shadow hover:bg-blue-700"

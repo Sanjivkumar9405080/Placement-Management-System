@@ -1,4 +1,5 @@
 const express = require("express");
+const multer = require("multer");
 
 const {
   createProfile,
@@ -44,7 +45,29 @@ router.post(
   "/upload-resume",
   protect,
   authorizeRoles("student"),
-  upload.single("resume"),
+  (req, res, next) => {
+    upload.single("resume")(req, res, (err) => {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          if (err.code === "LIMIT_FILE_SIZE") {
+            return res.status(400).json({
+              success: false,
+              message: "Resume size should be less than 5 MB.",
+            });
+          }
+          return res.status(400).json({
+            success: false,
+            message: `Upload error: ${err.message}`,
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          message: err.message || "Invalid file upload.",
+        });
+      }
+      next();
+    });
+  },
   uploadResume
 );
 

@@ -80,6 +80,11 @@ const studentSchema = new mongoose.Schema(
       default: "",
     },
 
+    resumePublicId: {
+      type: String,
+      default: "",
+    },
+
     achievements: [
       {
         id: Number,

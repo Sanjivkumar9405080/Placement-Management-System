@@ -56,6 +56,15 @@ const AdminStudentDetails = () => {
   const [notifType, setNotifType] = useState("general");
   const [notifLoading, setNotifLoading] = useState(false);
 
+  const getResumeUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    const baseUrl = (
+      import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api"
+    ).replace(/\/api\/?$/, "");
+    return `${baseUrl}/uploads/resumes/${url}`;
+  };
+
   useEffect(() => {
     fetchStudentDetails();
     fetchCompanies();
@@ -443,7 +452,7 @@ const AdminStudentDetails = () => {
 
                       <div className="flex items-center gap-2 pt-1">
                         <a
-                          href={student.resume}
+                          href={getResumeUrl(student.resume)}
                           target="_blank"
                           rel="noreferrer"
                           className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition shadow-sm"
@@ -452,7 +461,7 @@ const AdminStudentDetails = () => {
                           View Resume
                         </a>
                         <a
-                          href={student.resume}
+                          href={getResumeUrl(student.resume)}
                           download
                           target="_blank"
                           rel="noreferrer"

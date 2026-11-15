@@ -405,7 +405,7 @@ const CompanyApplicantDetails = () => {
                       <FileText size={24} className="text-red-500 shrink-0" />
                       <div className="min-w-0">
                         <p className="truncate text-xs font-bold text-slate-800">
-                          {student.resume}
+                          {student.resumeOriginalName || student.resume}
                         </p>
                         <p className="text-[11px] text-slate-400">
                           Uploaded PDF document
@@ -417,7 +417,7 @@ const CompanyApplicantDetails = () => {
                       href={
                         student.resume.startsWith("http")
                           ? student.resume
-                          : `${(import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/api\/?$/, "")}/uploads/${student.resume}`
+                          : `${(import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/api\/?$/, "")}/uploads/resumes/${student.resume}`
                       }
                       target="_blank"
                       rel="noopener noreferrer"

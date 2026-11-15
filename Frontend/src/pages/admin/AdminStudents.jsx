@@ -497,14 +497,24 @@ const AdminStudents = () => {
      RESUME DOWNLOAD HANDLERS (Requirement 1)
   ======================================================= */
 
+  const getResumeUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    const baseUrl = (
+      import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api"
+    ).replace(/\/api\/?$/, "");
+    return `${baseUrl}/uploads/resumes/${url}`;
+  };
+
   const downloadSingleResume = (resumeUrl, studentName = "Student") => {
     if (!resumeUrl) {
       showToast(`No resume document uploaded for ${studentName}.`);
       return;
     }
     const safeName = studentName.replace(/[^a-zA-Z0-9]/g, "_");
+    const targetUrl = getResumeUrl(resumeUrl);
     const link = document.createElement("a");
-    link.href = resumeUrl;
+    link.href = targetUrl;
     link.download = `${safeName}_Resume.pdf`;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
@@ -1273,7 +1283,7 @@ const AdminStudents = () => {
                             <div className="inline-flex items-center gap-1">
                               {/* View */}
                               <a
-                                href={s.resume}
+                                href={getResumeUrl(s.resume)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition shadow-sm"
@@ -1470,7 +1480,7 @@ const AdminStudents = () => {
                         {s.resume ? (
                           <>
                             <a
-                              href={s.resume}
+                              href={getResumeUrl(s.resume)}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
