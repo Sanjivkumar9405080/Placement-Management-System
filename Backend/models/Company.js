@@ -75,8 +75,14 @@ const companySchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+companySchema.virtual("name").get(function () {
+  return this.companyName || "";
+});
 
 const Company = mongoose.model("Company", companySchema);
 

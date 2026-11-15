@@ -77,37 +77,61 @@ const getAdminInterviews = async (req, res) => {
       if (endDate) query.date.$lte = new Date(new Date(endDate).setHours(23, 59, 59, 999));
     }
 
-    // Compute summary KPI counts across all interviews
-    const [
-      totalInterviews,
-      upcomingInterviews,
-      completedInterviews,
-      selectedInterviews,
-      rejectedInterviews,
-      rescheduledInterviews,
-      onHoldInterviews,
-    ] = await Promise.all([
-      Interview.countDocuments(),
-      Interview.countDocuments({
-        status: { $in: ["Scheduled", "Rescheduled"] },
-        date: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
-      }),
-      Interview.countDocuments({ status: "Completed" }),
-      Interview.countDocuments({ status: "Selected" }),
-      Interview.countDocuments({ status: "Rejected" }),
-      Interview.countDocuments({ status: "Rescheduled" }),
-      Interview.countDocuments({ status: "On Hold" }),
-    ]);
+    // Compute summary KPI counts across all interviews safely
+    let totalInterviews = 0;
+    let upcomingInterviews = 0;
+    let completedInterviews = 0;
+    let selectedInterviews = 0;
+    let rejectedInterviews = 0;
+    let rescheduledInterviews = 0;
+    let onHoldInterviews = 0;
 
-    // Query records with populate
+    try {
+      [
+        totalInterviews,
+        upcomingInterviews,
+        completedInterviews,
+        selectedInterviews,
+        rejectedInterviews,
+        rescheduledInterviews,
+        onHoldInterviews,
+      ] = await Promise.all([
+        Interview.countDocuments(),
+        Interview.countDocuments({
+          status: { $in: ["Scheduled", "Rescheduled"] },
+          date: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) },
+        }),
+        Interview.countDocuments({ status: "Completed" }),
+        Interview.countDocuments({ status: "Selected" }),
+        Interview.countDocuments({ status: "Rejected" }),
+        Interview.countDocuments({ status: "Rescheduled" }),
+        Interview.countDocuments({ status: "On Hold" }),
+      ]);
+    } catch (metricErr) {
+      console.warn("Non-fatal metric count error:", metricErr.message);
+    }
+
+    // Query records with robust population
     let interviewQuery = Interview.find(query)
       .populate({
         path: "student",
-        populate: { path: "user", select: "name email phone" },
+        populate: { path: "userId", select: "name email phone", strictPopulate: false },
+        strictPopulate: false,
       })
-      .populate("company", "name industry contactPerson email phone logo")
-      .populate("drive", "role package driveDate applicationDeadline jobType location")
-      .populate("round");
+      .populate({
+        path: "company",
+        select: "companyName name industry contactPerson hrName officialEmail email phone logo",
+        strictPopulate: false,
+      })
+      .populate({
+        path: "drive",
+        select: "role package driveDate applicationDeadline jobType location companyName",
+        strictPopulate: false,
+      })
+      .populate({
+        path: "round",
+        strictPopulate: false,
+      });
 
     // Sorting
     const sortObj = {};
@@ -120,23 +144,46 @@ const getAdminInterviews = async (req, res) => {
     }
     interviewQuery = interviewQuery.sort(sortObj);
 
-    let allMatches = await interviewQuery;
+    const rawMatches = await interviewQuery;
+
+    // Normalize populated records to ensure safe property access across various legacy formats
+    const allMatches = rawMatches.map((item) => {
+      const interviewObj = item.toObject ? item.toObject() : item;
+      const student = interviewObj.student || {};
+      const user = student.userId || student.user || {};
+      const studentName = student.fullName || user.name || student.name || "Student";
+      const studentEmail = user.email || student.email || "";
+      const studentPhone = user.phone || student.phone || "";
+      const studentRoll = student.rollNumber || student.rollNo || student.studentId || "N/A";
+      const company = interviewObj.company || {};
+      const compName = company.companyName || company.name || interviewObj.drive?.companyName || "Company";
+
+      return {
+        ...interviewObj,
+        student: {
+          ...student,
+          fullName: studentName,
+          email: studentEmail,
+          phone: studentPhone,
+          rollNo: studentRoll,
+          user: user,
+        },
+        company: {
+          ...company,
+          name: compName,
+          companyName: compName,
+        },
+      };
+    });
 
     // Search filter in populated fields (Student name, Roll, Company name, Role, Interviewer)
+    let filteredList = allMatches;
     if (search && search.trim()) {
       const q = search.trim().toLowerCase();
-      allMatches = allMatches.filter((item) => {
-        const studentName = (
-          item.student?.fullName ||
-          item.student?.user?.name ||
-          ""
-        ).toLowerCase();
-        const studentEmail = (
-          item.student?.user?.email ||
-          item.student?.email ||
-          ""
-        ).toLowerCase();
-        const rollNo = (item.student?.rollNo || item.student?.studentId || "").toLowerCase();
+      filteredList = filteredList.filter((item) => {
+        const studentName = (item.student?.fullName || "").toLowerCase();
+        const studentEmail = (item.student?.email || "").toLowerCase();
+        const rollNo = (item.student?.rollNo || "").toLowerCase();
         const compName = (item.company?.name || "").toLowerCase();
         const role = (item.drive?.role || "").toLowerCase();
         const interviewer = (item.interviewerName || "").toLowerCase();
@@ -154,8 +201,8 @@ const getAdminInterviews = async (req, res) => {
       });
     }
 
-    const filteredTotal = allMatches.length;
-    const paginatedInterviews = allMatches.slice(skip, skip + limitNum);
+    const filteredTotal = filteredList.length;
+    const paginatedInterviews = filteredList.slice(skip, skip + limitNum);
 
     return res.status(200).json({
       success: true,
@@ -177,10 +224,10 @@ const getAdminInterviews = async (req, res) => {
       interviews: paginatedInterviews,
     });
   } catch (error) {
-    console.error("Error in getAdminInterviews:", error);
+    console.error("Error in getAdminInterviews:", error.message, error.stack);
     return res.status(500).json({
       success: false,
-      message: "Failed to retrieve interviews",
+      message: error.message || "Failed to retrieve interviews",
       error: error.message,
     });
   }
@@ -196,14 +243,15 @@ const getAdminInterviewById = async (req, res) => {
     const interview = await Interview.findById(id)
       .populate({
         path: "student",
-        populate: { path: "user", select: "name email phone" },
+        populate: { path: "userId", select: "name email phone", strictPopulate: false },
+        strictPopulate: false,
       })
-      .populate("company")
-      .populate("drive")
-      .populate("round")
-      .populate("application")
-      .populate("feedback.submittedBy", "name email role")
-      .populate("feedback.publishedBy", "name email role");
+      .populate({ path: "company", strictPopulate: false })
+      .populate({ path: "drive", strictPopulate: false })
+      .populate({ path: "round", strictPopulate: false })
+      .populate({ path: "application", strictPopulate: false })
+      .populate({ path: "feedback.submittedBy", select: "name email role", strictPopulate: false })
+      .populate({ path: "feedback.publishedBy", select: "name email role", strictPopulate: false });
 
     if (!interview) {
       return res.status(404).json({
@@ -212,27 +260,54 @@ const getAdminInterviewById = async (req, res) => {
       });
     }
 
+    const interviewObj = interview.toObject ? interview.toObject() : interview;
+    const student = interviewObj.student || {};
+    const user = student.userId || student.user || {};
+    const studentName = student.fullName || user.name || student.name || "Student";
+    const studentEmail = user.email || student.email || "";
+    const studentPhone = user.phone || student.phone || "";
+    const studentRoll = student.rollNumber || student.rollNo || student.studentId || "N/A";
+    const company = interviewObj.company || {};
+    const compName = company.companyName || company.name || interviewObj.drive?.companyName || "Company";
+
+    const normalizedInterview = {
+      ...interviewObj,
+      student: {
+        ...student,
+        fullName: studentName,
+        email: studentEmail,
+        phone: studentPhone,
+        rollNo: studentRoll,
+        user: user,
+      },
+      company: {
+        ...company,
+        name: compName,
+        companyName: compName,
+      },
+    };
+
     // Also fetch all past round results for this student and drive
     let roundHistory = [];
     if (interview.drive && interview.student) {
       roundHistory = await PlacementRoundResult.find({
-        placementDrive: interview.drive._id,
-        student: interview.student._id,
+        placementDrive: interview.drive._id || interview.drive,
+        student: interview.student._id || interview.student,
       })
-        .populate("round")
+        .populate({ path: "round", strictPopulate: false })
         .sort({ roundNumber: 1 });
     }
 
     return res.status(200).json({
       success: true,
-      interview,
+      interview: normalizedInterview,
       roundHistory,
     });
   } catch (error) {
     console.error("Error in getAdminInterviewById:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to load interview details",
+      message: error.message || "Failed to load interview details",
       error: error.message,
     });
   }
@@ -243,34 +318,73 @@ const getAdminInterviewById = async (req, res) => {
  */
 const getAdminInterviewOptions = async (req, res) => {
   try {
-    // 1. All approved companies
-    const companies = await Company.find().select("name industry logo contactPerson email").sort({ name: 1 });
+    // 1. All companies
+    const companies = await Company.find()
+      .select("companyName name industry logo hrName officialEmail phone")
+      .sort({ companyName: 1 });
+
+    const normalizedCompanies = companies.map((c) => {
+      const obj = c.toObject ? c.toObject() : c;
+      return {
+        ...obj,
+        name: obj.companyName || obj.name || "Company",
+      };
+    });
 
     // 2. Active placement drives
     const drives = await PlacementDrive.find({ status: { $ne: "Closed" } })
-      .populate("company", "name logo")
-      .select("role company package driveDate applicationDeadline selectionProcess status")
+      .populate({ path: "company", select: "companyName name logo", strictPopulate: false })
+      .select("role company companyName package driveDate applicationDeadline selectionProcess status")
       .sort({ createdAt: -1 });
 
-    // 3. Applications grouped by drive (only Shortlisted, Applied, or Interview candidates)
+    const normalizedDrives = drives.map((d) => {
+      const obj = d.toObject ? d.toObject() : d;
+      const comp = obj.company || {};
+      return {
+        ...obj,
+        company: {
+          ...comp,
+          name: comp.companyName || comp.name || obj.companyName || "Company",
+        },
+      };
+    });
+
+    // 3. Applications grouped by drive
     const applications = await Application.find({
-      status: { $in: ["Shortlisted", "Applied", "Interview", "Under Review"] },
+      status: { $in: ["Shortlisted", "Applied", "Interview", "Under Review", "Pending"] },
     })
       .populate({
         path: "student",
-        populate: { path: "user", select: "name email phone" },
+        populate: { path: "userId", select: "name email phone", strictPopulate: false },
+        strictPopulate: false,
       })
-      .populate("drive", "role company")
+      .populate({ path: "drive", select: "role company companyName", strictPopulate: false })
       .select("student drive company status currentRoundNumber currentRoundName");
+
+    const normalizedApplications = applications.map((a) => {
+      const obj = a.toObject ? a.toObject() : a;
+      const st = obj.student || {};
+      const u = st.userId || st.user || {};
+      return {
+        ...obj,
+        student: {
+          ...st,
+          fullName: st.fullName || u.name || st.name || "Student",
+          rollNo: st.rollNumber || st.rollNo || "N/A",
+          branch: st.branch || "B.Tech",
+          user: u,
+        },
+      };
+    });
 
     // 4. Existing rounds configured for drives
     const existingRounds = await PlacementRound.find().sort({ roundNumber: 1 });
 
     return res.status(200).json({
       success: true,
-      companies,
-      drives,
-      applications,
+      companies: normalizedCompanies,
+      drives: normalizedDrives,
+      applications: normalizedApplications,
       existingRounds,
       defaultRounds: DEFAULT_ROUNDS,
     });
@@ -278,7 +392,7 @@ const getAdminInterviewOptions = async (req, res) => {
     console.error("Error in getAdminInterviewOptions:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to load scheduling form options",
+      message: error.message || "Failed to load scheduling form options",
       error: error.message,
     });
   }
@@ -353,7 +467,11 @@ const scheduleInterviewByAdmin = async (req, res) => {
     }
 
     // Resolve entities
-    const student = await Student.findById(studentId).populate("user");
+    const student = await Student.findById(studentId).populate({
+      path: "userId",
+      select: "name email phone",
+      strictPopulate: false,
+    });
     if (!student) {
       return res.status(404).json({ success: false, message: "Student record not found." });
     }
@@ -420,7 +538,6 @@ const scheduleInterviewByAdmin = async (req, res) => {
         createdBy: req.user._id,
       });
     } else {
-      // Keep PlacementRound updated with schedule details
       placementRound.scheduledDate = interviewDate;
       placementRound.scheduledTime = time;
       if (mode === "Online" && meetingLink) placementRound.meetingLink = meetingLink;
@@ -472,24 +589,25 @@ const scheduleInterviewByAdmin = async (req, res) => {
     });
 
     // Send In-App Notification to Student
-    const studentUser = student.user?._id || student.user;
+    const studentUser = student.userId?._id || student.userId || student.user;
     if (studentUser) {
       await Notification.create({
         userId: studentUser,
-        title: `Interview Scheduled: ${company.name}`,
-        message: `Your ${assignedRoundName} for ${drive.role} at ${company.name} is scheduled on ${new Date(date).toLocaleDateString()} at ${time} (${mode}).`,
+        title: `Interview Scheduled: ${company.companyName || company.name}`,
+        message: `Your ${assignedRoundName} for ${drive.role} at ${company.companyName || company.name} is scheduled on ${new Date(date).toLocaleDateString()} at ${time} (${mode}).`,
         type: "interview",
         sender: req.user._id,
       });
     }
 
     // Send Automated Email via emailService (failsafe)
-    const targetEmail = student.user?.email || student.email;
+    const targetEmail = student.userId?.email || student.email;
+    const targetName = student.userId?.name || student.fullName || "Student";
     if (targetEmail) {
       sendInterviewScheduledEmail({
         to: targetEmail,
-        studentName: student.fullName || student.user?.name || "Student",
-        companyName: company.name,
+        studentName: targetName,
+        companyName: company.companyName || company.name,
         role: drive.role,
         roundName: assignedRoundName,
         date: interviewDate,
@@ -502,24 +620,16 @@ const scheduleInterviewByAdmin = async (req, res) => {
       });
     }
 
-    const populatedInterview = await Interview.findById(newInterview._id)
-      .populate({
-        path: "student",
-        populate: { path: "user", select: "name email phone" },
-      })
-      .populate("company", "name industry logo")
-      .populate("drive", "role package");
-
     return res.status(201).json({
       success: true,
       message: "Interview scheduled successfully and student notified.",
-      interview: populatedInterview,
+      interview: newInterview,
     });
   } catch (error) {
     console.error("Error in scheduleInterviewByAdmin:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to schedule interview.",
+      message: error.message || "Failed to schedule interview.",
       error: error.message,
     });
   }
@@ -547,10 +657,7 @@ const updateInterviewByAdmin = async (req, res) => {
       status,
     } = req.body;
 
-    const interview = await Interview.findById(id)
-      .populate("student")
-      .populate("company")
-      .populate("drive");
+    const interview = await Interview.findById(id);
 
     if (!interview) {
       return res.status(404).json({ success: false, message: "Interview not found." });
@@ -581,7 +688,7 @@ const updateInterviewByAdmin = async (req, res) => {
     console.error("Error in updateInterviewByAdmin:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to update interview details.",
+      message: error.message || "Failed to update interview details.",
       error: error.message,
     });
   }
@@ -626,10 +733,11 @@ const rescheduleInterviewByAdmin = async (req, res) => {
     const interview = await Interview.findById(id)
       .populate({
         path: "student",
-        populate: { path: "user", select: "name email" },
+        populate: { path: "userId", select: "name email", strictPopulate: false },
+        strictPopulate: false,
       })
-      .populate("company", "name")
-      .populate("drive", "role");
+      .populate({ path: "company", select: "companyName name", strictPopulate: false })
+      .populate({ path: "drive", select: "role", strictPopulate: false });
 
     if (!interview) {
       return res.status(404).json({ success: false, message: "Interview not found." });
@@ -648,24 +756,27 @@ const rescheduleInterviewByAdmin = async (req, res) => {
     await interview.save();
 
     // Notify student in-app
-    const studentUser = interview.student?.user?._id || interview.student?.user;
+    const studentUser = interview.student?.userId?._id || interview.student?.userId || interview.student?.user;
+    const compName = interview.company?.companyName || interview.company?.name || "Company";
+
     if (studentUser) {
       await Notification.create({
         userId: studentUser,
-        title: `Interview Rescheduled: ${interview.company?.name}`,
-        message: `Your ${interview.roundName} with ${interview.company?.name} has been rescheduled to ${new Date(newDate).toLocaleDateString()} at ${newTime}.`,
+        title: `Interview Rescheduled: ${compName}`,
+        message: `Your ${interview.roundName} with ${compName} has been rescheduled to ${new Date(newDate).toLocaleDateString()} at ${newTime}.`,
         type: "interview",
         sender: req.user._id,
       });
     }
 
     // Send email alert
-    const targetEmail = interview.student?.user?.email || interview.student?.email;
+    const targetEmail = interview.student?.userId?.email || interview.student?.email;
+    const targetName = interview.student?.userId?.name || interview.student?.fullName || "Student";
     if (targetEmail) {
       sendInterviewRescheduledEmail({
         to: targetEmail,
-        studentName: interview.student?.fullName || interview.student?.user?.name || "Student",
-        companyName: interview.company?.name || "Company",
+        studentName: targetName,
+        companyName: compName,
         role: interview.drive?.role || "Position",
         roundName: interview.roundName,
         newDate: parsedDate,
@@ -686,7 +797,7 @@ const rescheduleInterviewByAdmin = async (req, res) => {
     console.error("Error in rescheduleInterviewByAdmin:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to reschedule interview.",
+      message: error.message || "Failed to reschedule interview.",
       error: error.message,
     });
   }
@@ -742,7 +853,7 @@ const updateInterviewStatusByAdmin = async (req, res) => {
     console.error("Error in updateInterviewStatusByAdmin:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to update interview status.",
+      message: error.message || "Failed to update interview status.",
       error: error.message,
     });
   }
@@ -802,7 +913,7 @@ const submitInterviewFeedback = async (req, res) => {
     console.error("Error in submitInterviewFeedback:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to submit interview feedback.",
+      message: error.message || "Failed to submit interview feedback.",
       error: error.message,
     });
   }
@@ -832,10 +943,11 @@ const publishInterviewResult = async (req, res) => {
     const interview = await Interview.findById(id)
       .populate({
         path: "student",
-        populate: { path: "user", select: "name email" },
+        populate: { path: "userId", select: "name email", strictPopulate: false },
+        strictPopulate: false,
       })
-      .populate("company", "name")
-      .populate("drive", "role package");
+      .populate({ path: "company", select: "companyName name", strictPopulate: false })
+      .populate({ path: "drive", select: "role package", strictPopulate: false });
 
     if (!interview) {
       return res.status(404).json({ success: false, message: "Interview not found." });
@@ -865,11 +977,15 @@ const publishInterviewResult = async (req, res) => {
     else if (decision === "Selected") roundResultStatus = "Selected";
     else if (decision === "Rejected") roundResultStatus = "Rejected";
 
-    if (interview.drive && interview.student) {
+    const compName = interview.company?.companyName || interview.company?.name || "Company";
+    const driveIdVal = interview.drive?._id || interview.drive;
+    const studentIdVal = interview.student?._id || interview.student;
+
+    if (driveIdVal && studentIdVal) {
       await PlacementRoundResult.findOneAndUpdate(
         {
-          placementDrive: interview.drive._id,
-          student: interview.student._id,
+          placementDrive: driveIdVal,
+          student: studentIdVal,
           roundNumber: interview.roundNumber || 1,
         },
         {
@@ -904,17 +1020,17 @@ const publishInterviewResult = async (req, res) => {
     }
 
     // 3. Dispatch In-App Notification to Student
-    const studentUser = interview.student?.user?._id || interview.student?.user;
+    const studentUser = interview.student?.userId?._id || interview.student?.userId || interview.student?.user;
     if (studentUser) {
-      let notifTitle = `Interview Result Published: ${interview.company?.name}`;
-      let notifMsg = `Result for your ${interview.roundName} with ${interview.company?.name}: ${decision}.`;
+      let notifTitle = `Interview Result Published: ${compName}`;
+      let notifMsg = `Result for your ${interview.roundName} with ${compName}: ${decision}.`;
 
       if (decision === "Selected") {
-        notifTitle = `🎉 Congratulations! Selected by ${interview.company?.name}`;
-        notifMsg = `You have been officially selected for ${interview.drive?.role} at ${interview.company?.name}!`;
+        notifTitle = `🎉 Congratulations! Selected by ${compName}`;
+        notifMsg = `You have been officially selected for ${interview.drive?.role} at ${compName}!`;
       } else if (decision === "Cleared") {
-        notifTitle = `Round Cleared: ${interview.roundName} at ${interview.company?.name}`;
-        notifMsg = `You have successfully cleared ${interview.roundName} at ${interview.company?.name}!`;
+        notifTitle = `Round Cleared: ${interview.roundName} at ${compName}`;
+        notifMsg = `You have successfully cleared ${interview.roundName} at ${compName}!`;
       }
 
       await Notification.create({
@@ -927,13 +1043,14 @@ const publishInterviewResult = async (req, res) => {
     }
 
     // 4. Send Email Notification
-    const targetEmail = interview.student?.user?.email || interview.student?.email;
+    const targetEmail = interview.student?.userId?.email || interview.student?.email;
+    const targetName = interview.student?.userId?.name || interview.student?.fullName || "Student";
     if (targetEmail) {
       if (decision === "Selected") {
         sendFinalSelectionEmail({
           to: targetEmail,
-          studentName: interview.student?.fullName || interview.student?.user?.name || "Student",
-          companyName: interview.company?.name || "Company",
+          studentName: targetName,
+          companyName: compName,
           role: interview.drive?.role || "Position",
           packageAmount: packageAmount || interview.drive?.package,
           additionalInfo: adminNotes,
@@ -941,8 +1058,8 @@ const publishInterviewResult = async (req, res) => {
       } else if (decision === "Cleared") {
         sendRoundClearedEmail({
           to: targetEmail,
-          studentName: interview.student?.fullName || interview.student?.user?.name || "Student",
-          companyName: interview.company?.name || "Company",
+          studentName: targetName,
+          companyName: compName,
           role: interview.drive?.role || "Position",
           roundName: interview.roundName,
           nextRoundName: "Next Scheduled Stage",
@@ -950,8 +1067,8 @@ const publishInterviewResult = async (req, res) => {
       } else if (decision === "Rejected") {
         sendRoundRejectedEmail({
           to: targetEmail,
-          studentName: interview.student?.fullName || interview.student?.user?.name || "Student",
-          companyName: interview.company?.name || "Company",
+          studentName: targetName,
+          companyName: compName,
           role: interview.drive?.role || "Position",
           roundName: interview.roundName,
           feedback: adminNotes || "Thank you for your enthusiastic participation.",
@@ -968,7 +1085,7 @@ const publishInterviewResult = async (req, res) => {
     console.error("Error in publishInterviewResult:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to publish interview result.",
+      message: error.message || "Failed to publish interview result.",
       error: error.message,
     });
   }
@@ -1005,7 +1122,7 @@ const deleteInterviewByAdmin = async (req, res) => {
     console.error("Error in deleteInterviewByAdmin:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to delete interview schedule.",
+      message: error.message || "Failed to delete interview schedule.",
       error: error.message,
     });
   }
@@ -1019,7 +1136,7 @@ const getAdminInterviewCalendar = async (req, res) => {
     const { month, year } = req.query;
 
     const targetYear = parseInt(year, 10) || new Date().getFullYear();
-    const targetMonth = month !== undefined ? parseInt(month, 10) : new Date().getMonth(); // 0-indexed
+    const targetMonth = month !== undefined ? parseInt(month, 10) : new Date().getMonth();
 
     const startOfMonth = new Date(targetYear, targetMonth, 1);
     const endOfMonth = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59, 999);
@@ -1029,24 +1146,43 @@ const getAdminInterviewCalendar = async (req, res) => {
     })
       .populate({
         path: "student",
-        populate: { path: "user", select: "name email phone" },
+        populate: { path: "userId", select: "name email phone", strictPopulate: false },
+        strictPopulate: false,
       })
-      .populate("company", "name logo")
-      .populate("drive", "role package")
+      .populate({ path: "company", select: "companyName name logo", strictPopulate: false })
+      .populate({ path: "drive", select: "role package", strictPopulate: false })
       .sort({ date: 1, time: 1 });
+
+    const normalizedEvents = interviews.map((item) => {
+      const obj = item.toObject ? item.toObject() : item;
+      const st = obj.student || {};
+      const u = st.userId || st.user || {};
+      const comp = obj.company || {};
+      return {
+        ...obj,
+        student: {
+          ...st,
+          fullName: st.fullName || u.name || st.name || "Student",
+        },
+        company: {
+          ...comp,
+          name: comp.companyName || comp.name || obj.drive?.companyName || "Company",
+        },
+      };
+    });
 
     return res.status(200).json({
       success: true,
       month: targetMonth,
       year: targetYear,
-      totalEvents: interviews.length,
-      events: interviews,
+      totalEvents: normalizedEvents.length,
+      events: normalizedEvents,
     });
   } catch (error) {
     console.error("Error in getAdminInterviewCalendar:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to load calendar events",
+      message: error.message || "Failed to load calendar events",
       error: error.message,
     });
   }
@@ -1058,11 +1194,12 @@ const getAdminInterviewCalendar = async (req, res) => {
 const getAdminInterviewAnalytics = async (req, res) => {
   try {
     const allInterviews = await Interview.find()
-      .populate("company", "name industry")
-      .populate("drive", "role package passingYear")
+      .populate({ path: "company", select: "companyName name industry", strictPopulate: false })
+      .populate({ path: "drive", select: "role package passingYear graduationYear", strictPopulate: false })
       .populate({
         path: "student",
-        select: "passingYear branch course",
+        select: "passingYear graduationYear branch course",
+        strictPopulate: false,
       });
 
     const total = allInterviews.length;
@@ -1079,7 +1216,7 @@ const getAdminInterviewAnalytics = async (req, res) => {
     // Company-wise distribution
     const companyStatsMap = {};
     allInterviews.forEach((item) => {
-      const compName = item.company?.name || "Unassigned Company";
+      const compName = item.company?.companyName || item.company?.name || item.drive?.companyName || "Unassigned Company";
       if (!companyStatsMap[compName]) {
         companyStatsMap[compName] = { name: compName, total: 0, completed: 0, selected: 0, rejected: 0 };
       }
@@ -1106,7 +1243,7 @@ const getAdminInterviewAnalytics = async (req, res) => {
     // Year-wise / Batch distribution
     const yearStatsMap = {};
     allInterviews.forEach((item) => {
-      const yr = item.student?.passingYear || item.drive?.passingYear || "2027";
+      const yr = item.student?.graduationYear || item.student?.passingYear || item.drive?.passingYear || "2027";
       if (!yearStatsMap[yr]) {
         yearStatsMap[yr] = { year: yr, total: 0, selected: 0, completed: 0 };
       }
@@ -1137,7 +1274,7 @@ const getAdminInterviewAnalytics = async (req, res) => {
     console.error("Error in getAdminInterviewAnalytics:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to generate interview analytics",
+      message: error.message || "Failed to generate interview analytics",
       error: error.message,
     });
   }
@@ -1159,10 +1296,11 @@ const exportAdminInterviewsCSV = async (req, res) => {
     const interviews = await Interview.find(query)
       .populate({
         path: "student",
-        populate: { path: "user", select: "name email phone" },
+        populate: { path: "userId", select: "name email phone", strictPopulate: false },
+        strictPopulate: false,
       })
-      .populate("company", "name industry")
-      .populate("drive", "role package")
+      .populate({ path: "company", select: "companyName name industry", strictPopulate: false })
+      .populate({ path: "drive", select: "role package", strictPopulate: false })
       .sort({ date: -1 });
 
     const headers = [
@@ -1193,13 +1331,15 @@ const exportAdminInterviewsCSV = async (req, res) => {
     ];
 
     const rows = interviews.map((inv) => {
-      const studentName = inv.student?.fullName || inv.student?.user?.name || "N/A";
-      const rollNo = inv.student?.rollNo || inv.student?.studentId || "N/A";
-      const studentEmail = inv.student?.user?.email || inv.student?.email || "N/A";
-      const phone = inv.student?.user?.phone || inv.student?.phone || "N/A";
-      const branch = inv.student?.branch || "N/A";
-      const passingYear = inv.student?.passingYear || "N/A";
-      const compName = inv.company?.name || "N/A";
+      const student = inv.student || {};
+      const user = student.userId || student.user || {};
+      const studentName = student.fullName || user.name || student.name || "N/A";
+      const rollNo = student.rollNumber || student.rollNo || student.studentId || "N/A";
+      const studentEmail = user.email || student.email || "N/A";
+      const phone = user.phone || student.phone || "N/A";
+      const branch = student.branch || "N/A";
+      const passingYear = student.graduationYear || student.passingYear || "N/A";
+      const compName = inv.company?.companyName || inv.company?.name || inv.drive?.companyName || "N/A";
       const role = inv.drive?.role || "N/A";
       const roundName = inv.roundName || `Round ${inv.roundNumber || 1}`;
       const dateStr = inv.date ? new Date(inv.date).toISOString().split("T")[0] : "N/A";
@@ -1246,7 +1386,7 @@ const exportAdminInterviewsCSV = async (req, res) => {
     console.error("Error in exportAdminInterviewsCSV:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to export interview report CSV",
+      message: error.message || "Failed to export interview report CSV",
       error: error.message,
     });
   }
@@ -1259,7 +1399,11 @@ const getDriveRoundsByAdmin = async (req, res) => {
   try {
     const { driveId } = req.params;
 
-    const drive = await PlacementDrive.findById(driveId).populate("company", "name logo");
+    const drive = await PlacementDrive.findById(driveId).populate({
+      path: "company",
+      select: "companyName name logo",
+      strictPopulate: false,
+    });
     if (!drive) {
       return res.status(404).json({ success: false, message: "Drive not found." });
     }
@@ -1289,7 +1433,7 @@ const getDriveRoundsByAdmin = async (req, res) => {
     console.error("Error in getDriveRoundsByAdmin:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to retrieve drive rounds",
+      message: error.message || "Failed to retrieve drive rounds",
       error: error.message,
     });
   }
@@ -1298,7 +1442,7 @@ const getDriveRoundsByAdmin = async (req, res) => {
 const saveDriveRoundsByAdmin = async (req, res) => {
   try {
     const { driveId } = req.params;
-    const { rounds } = req.body; // array of { roundNumber, roundName, roundDescription, scheduledDate, scheduledTime, location, meetingLink, instructions }
+    const { rounds } = req.body;
 
     const drive = await PlacementDrive.findById(driveId);
     if (!drive) {
@@ -1342,7 +1486,7 @@ const saveDriveRoundsByAdmin = async (req, res) => {
     console.error("Error in saveDriveRoundsByAdmin:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to save drive rounds",
+      message: error.message || "Failed to save drive rounds",
       error: error.message,
     });
   }

@@ -114,8 +114,25 @@ const studentSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+studentSchema.virtual("user", {
+  ref: "User",
+  localField: "userId",
+  foreignField: "_id",
+  justOne: true,
+});
+
+studentSchema.virtual("fullName").get(function () {
+  return this.userId?.name || "";
+});
+
+studentSchema.virtual("rollNo").get(function () {
+  return this.rollNumber || "";
+});
 
 const Student = mongoose.model("Student", studentSchema);
 
