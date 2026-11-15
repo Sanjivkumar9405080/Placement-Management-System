@@ -6,20 +6,24 @@ const CompanySuggestion = require("../models/CompanySuggestion");
 
 // Ensure Cloudinary is configured with environment variables
 const ensureCloudinaryConfig = () => {
+  if (process.env.CLOUDINARY_URL) {
+    return;
+  }
+
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
   const apiSecret = process.env.CLOUDINARY_API_SECRET;
 
   if (!cloudName || !apiKey || !apiSecret) {
     throw new Error(
-      "Cloudinary credentials are not configured. Please ensure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET are set in environment variables."
+      "Cloudinary credentials are not configured. Please ensure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET (or CLOUDINARY_URL) are set in environment variables."
     );
   }
 
   cloudinary.config({
-    cloud_name: cloudName,
-    api_key: apiKey,
-    api_secret: apiSecret,
+    cloud_name: cloudName.trim(),
+    api_key: apiKey.trim(),
+    api_secret: apiSecret.trim(),
   });
 };
 
@@ -295,11 +299,19 @@ const uploadResume = async (req, res) => {
       );
     } catch (cloudErr) {
       console.error("Cloudinary upload failed:", cloudErr);
+      const errMsg = cloudErr.message || "Upload error";
+      let userHelpMessage = `Failed to upload resume to Cloudinary: ${errMsg}`;
+
+      if (
+        errMsg.includes("Invalid cloud_name") ||
+        errMsg.includes("cloud_name mismatch")
+      ) {
+        userHelpMessage = `Cloudinary authentication failed: '${process.env.CLOUDINARY_CLOUD_NAME}' is not the registered Cloud Name for your Cloudinary account. Please find your Cloud Name on your Cloudinary Dashboard (https://console.cloudinary.com/) and update CLOUDINARY_CLOUD_NAME in your environment variables.`;
+      }
+
       return res.status(502).json({
         success: false,
-        message: `Failed to upload resume to Cloudinary: ${
-          cloudErr.message || "Upload error"
-        }`,
+        message: userHelpMessage,
       });
     }
 
