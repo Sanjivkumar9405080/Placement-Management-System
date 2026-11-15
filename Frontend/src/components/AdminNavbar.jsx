@@ -7,6 +7,7 @@ import {
   BriefcaseBusiness,
   FileText,
   CalendarCheck,
+  Workflow,
   UserCircle,
   LogOut,
   Menu,
@@ -66,6 +67,11 @@ const AdminNavbar = () => {
       name: "Interviews",
       path: "/admin/interviews",
       icon: CalendarCheck,
+    },
+    {
+      name: "Placement Tracking",
+      path: "/admin/placement-tracking",
+      icon: Workflow,
     },
   ];
 

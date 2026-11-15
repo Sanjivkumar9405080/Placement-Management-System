@@ -29,6 +29,9 @@ import AdminPlacementDriveDetails from "./pages/admin/AdminPlacementDriveDetails
 import AdminDriveApplicants from "./pages/admin/AdminDriveApplicants";
 import AdminApplications from "./pages/admin/AdminApplications";
 import AdminApplicationDetails from "./pages/admin/AdminApplicationDetails";
+import CompanyRoundManagement from "./pages/company/CompanyRoundManagement";
+import StudentPlacementJourney from "./pages/student/StudentPlacementJourney";
+import AdminPlacementTracking from "./pages/admin/AdminPlacementTracking";
 
 function App() {
   return (
@@ -85,6 +88,14 @@ function App() {
           path="/notifications"
           element={<Notifications />}
         />
+        <Route
+          path="/student/placement-journey"
+          element={<StudentPlacementJourney />}
+        />
+        <Route
+          path="/student/journey"
+          element={<StudentPlacementJourney />}
+        />
 
         {/* Company */}
         <Route
@@ -120,6 +131,14 @@ function App() {
 <Route
   path="/company/profile"
   element={<CompanyProfile />}
+/>
+<Route
+  path="/company/rounds"
+  element={<CompanyRoundManagement />}
+/>
+<Route
+  path="/company/round-management"
+  element={<CompanyRoundManagement />}
 />
 
         {/* Admin */}
@@ -162,6 +181,14 @@ function App() {
         <Route
           path="/admin/applications/:id"
           element={<AdminApplicationDetails />}
+        />
+        <Route
+          path="/admin/placement-tracking"
+          element={<AdminPlacementTracking />}
+        />
+        <Route
+          path="/admin/tracking"
+          element={<AdminPlacementTracking />}
         />
 
         <Route

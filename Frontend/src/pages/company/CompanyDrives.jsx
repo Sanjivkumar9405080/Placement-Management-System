@@ -957,6 +957,14 @@ const CompanyDriveCard = ({ drive, onCloseDrive }) => {
 
         <div className="flex items-center gap-2">
           <Link
+            to={`/company/rounds?driveId=${drive._id}`}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-purple-50 px-3.5 py-2 text-xs font-bold text-purple-600 transition hover:bg-purple-600 hover:text-white"
+          >
+            Manage Rounds
+            <ArrowRight size={14} />
+          </Link>
+
+          <Link
             to="/company/applicants"
             className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-600 transition hover:bg-blue-600 hover:text-white"
           >

@@ -136,4 +136,27 @@ export const adminAPI = {
     api.put(`/admin/company-suggestions/${id}/status`, { status, adminNotes }),
 };
 
+// Round Tracking API helpers
+export const roundTrackingAPI = {
+  // Company & Admin
+  getDriveRounds: (driveId) => api.get(`/rounds/drive/${driveId}`),
+  configureRound: (driveId, data) => api.post(`/rounds/drive/${driveId}`, data),
+  updateRoundResults: (roundId, data) =>
+    api.post(`/rounds/${roundId}/results`, data),
+  promoteCandidates: (driveId, data) =>
+    api.post(`/rounds/drive/${driveId}/promote`, data),
+  markFinalSelection: (driveId, data) =>
+    api.post(`/rounds/drive/${driveId}/final-selection`, data),
+
+  // Student
+  getStudentJourney: () => api.get("/rounds/student/journey"),
+
+  // Admin
+  getAdminTracking: (params) => api.get("/rounds/admin/tracking", { params }),
+  getAdminStudentJourney: (studentId) =>
+    api.get(`/rounds/admin/student/${studentId}`),
+  exportAdminTrackingCSV: (params) =>
+    api.get("/rounds/admin/export", { params, responseType: "blob" }),
+};
+
 export default api;

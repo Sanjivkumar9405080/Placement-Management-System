@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ChevronDown,
   LayoutDashboard,
+  Layers,
   LogOut,
   Menu,
   UserCircle,
@@ -64,6 +65,11 @@ const CompanyNavbar = () => {
       name: "Applicants",
       path: "/company/applicants",
       icon: Users,
+    },
+    {
+      name: "Round Management",
+      path: "/company/rounds",
+      icon: Layers,
     },
     {
       name: "Interviews",

@@ -39,6 +39,33 @@ const applicationSchema = new mongoose.Schema(
       default: "Applied",
     },
 
+    currentRoundNumber: {
+      type: Number,
+      default: 1,
+    },
+
+    currentRoundName: {
+      type: String,
+      default: "Round 1",
+      trim: true,
+    },
+
+    currentRoundStatus: {
+      type: String,
+      enum: [
+        "Applied",
+        "Pending",
+        "Round Scheduled",
+        "In Progress",
+        "Cleared",
+        "Rejected",
+        "Upcoming",
+        "Selected",
+        "Not Selected",
+      ],
+      default: "Pending",
+    },
+
     appliedAt: {
       type: Date,
       default: Date.now,
