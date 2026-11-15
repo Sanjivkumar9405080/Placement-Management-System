@@ -159,4 +159,28 @@ export const roundTrackingAPI = {
     api.get("/rounds/admin/export", { params, responseType: "blob" }),
 };
 
+// Admin Interview Management API
+export const adminInterviewsAPI = {
+  getInterviews: (params) => api.get("/admin/interviews", { params }),
+  getInterviewById: (id) => api.get(`/admin/interviews/${id}`),
+  getOptions: () => api.get("/admin/interviews/options"),
+  scheduleInterview: (data) => api.post("/admin/interviews", data),
+  updateInterview: (id, data) => api.put(`/admin/interviews/${id}`, data),
+  rescheduleInterview: (id, data) =>
+    api.put(`/admin/interviews/${id}/reschedule`, data),
+  updateStatus: (id, data) => api.put(`/admin/interviews/${id}/status`, data),
+  submitFeedback: (id, data) =>
+    api.put(`/admin/interviews/${id}/feedback`, data),
+  publishResult: (id, data) =>
+    api.put(`/admin/interviews/${id}/publish-result`, data),
+  deleteInterview: (id) => api.delete(`/admin/interviews/${id}`),
+  getCalendar: (params) => api.get("/admin/interviews/calendar", { params }),
+  getAnalytics: () => api.get("/admin/interviews/analytics"),
+  exportCSV: (params) =>
+    api.get("/admin/interviews/export-csv", { params, responseType: "blob" }),
+  getDriveRounds: (driveId) => api.get(`/admin/interviews/rounds/${driveId}`),
+  saveDriveRounds: (driveId, data) =>
+    api.post(`/admin/interviews/rounds/${driveId}`, data),
+};
+
 export default api;

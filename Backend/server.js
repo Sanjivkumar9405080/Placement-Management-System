@@ -14,6 +14,7 @@ const interviewScheduleRoutes = require("./routes/interviewScheduleRoutes");
 const placementDriveRoutes = require("./routes/placementDriveRoutes");
 const interviewRoutes = require("./routes/interviewRoutes");
 const roundTrackingRoutes = require("./routes/roundTrackingRoutes");
+const adminInterviewRoutes = require("./routes/adminInterviewRoutes");
 
 dotenv.config();
 
@@ -75,6 +76,7 @@ app.use("/api/applications", applicationRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/schedules", interviewScheduleRoutes);
 app.use("/api/interviews", interviewRoutes);
+app.use("/api/admin/interviews", adminInterviewRoutes);
 app.use("/api/rounds", roundTrackingRoutes);
 
 // Fallback: also mount routes without /api prefix
@@ -89,6 +91,7 @@ app.use("/applications", applicationRoutes);
 app.use("/notifications", notificationRoutes);
 app.use("/schedules", interviewScheduleRoutes);
 app.use("/interviews", interviewRoutes);
+app.use("/admin/interviews", adminInterviewRoutes);
 app.use("/rounds", roundTrackingRoutes);
 
 // Global 404 handler

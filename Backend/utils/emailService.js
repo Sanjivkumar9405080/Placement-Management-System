@@ -293,10 +293,159 @@ const sendFinalSelectionEmail = async ({
   return sendEmail({ to, subject, html });
 };
 
+// E. When an interview is scheduled
+const sendInterviewScheduledEmail = async ({
+  to,
+  studentName,
+  companyName,
+  role,
+  roundName,
+  date,
+  time,
+  mode,
+  meetingLink,
+  venue,
+  interviewerName,
+  instructions,
+}) => {
+  const formattedDate = new Date(date).toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const subject = `Interview Scheduled: ${roundName} with ${companyName}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #2563eb; margin: 0;">📅 Interview Scheduled</h2>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Placement Cell Interview Notice</p>
+      </div>
+
+      <p style="font-size: 15px; color: #334155; line-height: 1.6;">
+        Dear <strong>${studentName}</strong>,
+      </p>
+
+      <p style="font-size: 15px; color: #334155; line-height: 1.6;">
+        An interview session has been scheduled for you for the <strong>${role}</strong> opportunity at <strong>${companyName}</strong>. Please review the details below:
+      </p>
+
+      <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <h4 style="color: #1d4ed8; margin: 0 0 10px 0; font-size: 14px; text-transform: uppercase;">Interview Details</h4>
+        <p style="margin: 4px 0; color: #1e40af; font-size: 14px;"><strong>Round:</strong> ${roundName}</p>
+        <p style="margin: 4px 0; color: #1e40af; font-size: 14px;"><strong>Date:</strong> ${formattedDate}</p>
+        <p style="margin: 4px 0; color: #1e40af; font-size: 14px;"><strong>Time:</strong> ${time}</p>
+        <p style="margin: 4px 0; color: #1e40af; font-size: 14px;"><strong>Mode:</strong> ${mode}</p>
+        ${
+          mode === "Online" && meetingLink
+            ? `<p style="margin: 6px 0; color: #1e40af; font-size: 14px;"><strong>Meeting Link:</strong> <a href="${meetingLink}" target="_blank" style="color: #2563eb; text-decoration: underline; word-break: break-all;">${meetingLink}</a></p>`
+            : ""
+        }
+        ${
+          mode === "Offline" && venue
+            ? `<p style="margin: 4px 0; color: #1e40af; font-size: 14px;"><strong>Location / Venue:</strong> ${venue}</p>`
+            : ""
+        }
+        ${
+          interviewerName
+            ? `<p style="margin: 4px 0; color: #1e40af; font-size: 14px;"><strong>Interviewer:</strong> ${interviewerName}</p>`
+            : ""
+        }
+        ${
+          instructions
+            ? `<div style="margin-top: 10px; border-top: 1px dashed #bfdbfe; padding-top: 8px; color: #1e3a8a; font-size: 13px;"><strong>Instructions:</strong> ${instructions}</div>`
+            : ""
+        }
+      </div>
+
+      <p style="font-size: 14px; color: #475569; line-height: 1.5;">
+        Please join or report 10 minutes prior to the scheduled time with your college ID card and updated resume.
+      </p>
+
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8; text-align: center;">
+        Placement Cell Management System • Automated Notification
+      </div>
+    </div>
+  `;
+
+  return sendEmail({ to, subject, html });
+};
+
+// F. When an interview is rescheduled
+const sendInterviewRescheduledEmail = async ({
+  to,
+  studentName,
+  companyName,
+  role,
+  roundName,
+  newDate,
+  newTime,
+  mode,
+  meetingLink,
+  venue,
+  reason,
+}) => {
+  const formattedDate = new Date(newDate).toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const subject = `Interview Rescheduled: ${roundName} - ${companyName}`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h2 style="color: #d97706; margin: 0;">⏰ Interview Rescheduled</h2>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Placement Cell Schedule Update</p>
+      </div>
+
+      <p style="font-size: 15px; color: #334155; line-height: 1.6;">
+        Dear <strong>${studentName}</strong>,
+      </p>
+
+      <p style="font-size: 15px; color: #334155; line-height: 1.6;">
+        Your interview for <strong>${roundName}</strong> (${role} at ${companyName}) has been rescheduled to a new slot:
+      </p>
+
+      <div style="background-color: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <h4 style="color: #b45309; margin: 0 0 10px 0; font-size: 14px; text-transform: uppercase;">Updated Schedule</h4>
+        <p style="margin: 4px 0; color: #92400e; font-size: 14px;"><strong>New Date:</strong> ${formattedDate}</p>
+        <p style="margin: 4px 0; color: #92400e; font-size: 14px;"><strong>New Time:</strong> ${newTime}</p>
+        <p style="margin: 4px 0; color: #92400e; font-size: 14px;"><strong>Mode:</strong> ${mode}</p>
+        ${
+          mode === "Online" && meetingLink
+            ? `<p style="margin: 6px 0; color: #92400e; font-size: 14px;"><strong>Meeting Link:</strong> <a href="${meetingLink}" target="_blank" style="color: #2563eb; text-decoration: underline;">${meetingLink}</a></p>`
+            : ""
+        }
+        ${
+          mode === "Offline" && venue
+            ? `<p style="margin: 4px 0; color: #92400e; font-size: 14px;"><strong>Location / Venue:</strong> ${venue}</p>`
+            : ""
+        }
+        ${
+          reason
+            ? `<div style="margin-top: 10px; border-top: 1px dashed #fde68a; padding-top: 8px; color: #78350f; font-size: 13px;"><strong>Reason / Remarks:</strong> ${reason}</div>`
+            : ""
+        }
+      </div>
+
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8; text-align: center;">
+        Placement Cell Management System • Automated Notification
+      </div>
+    </div>
+  `;
+
+  return sendEmail({ to, subject, html });
+};
+
 module.exports = {
   sendEmail,
   sendRoundClearedEmail,
   sendRoundRejectedEmail,
   sendRoundScheduledEmail,
   sendFinalSelectionEmail,
+  sendInterviewScheduledEmail,
+  sendInterviewRescheduledEmail,
 };

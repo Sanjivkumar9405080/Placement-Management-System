@@ -32,6 +32,7 @@ import AdminApplicationDetails from "./pages/admin/AdminApplicationDetails";
 import CompanyRoundManagement from "./pages/company/CompanyRoundManagement";
 import StudentPlacementJourney from "./pages/student/StudentPlacementJourney";
 import AdminPlacementTracking from "./pages/admin/AdminPlacementTracking";
+import AdminInterviews from "./pages/admin/AdminInterviews";
 
 function App() {
   return (
@@ -181,6 +182,14 @@ function App() {
         <Route
           path="/admin/applications/:id"
           element={<AdminApplicationDetails />}
+        />
+        <Route
+          path="/admin/interviews"
+          element={<AdminInterviews />}
+        />
+        <Route
+          path="/admin/interview"
+          element={<AdminInterviews />}
         />
         <Route
           path="/admin/placement-tracking"

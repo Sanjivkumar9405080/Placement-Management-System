@@ -278,4 +278,8 @@ router.put(
   updateCompanySuggestionStatus
 );
 
+// Admin Interview Management Sub-router
+const adminInterviewRoutes = require("./adminInterviewRoutes");
+router.use("/interviews", adminInterviewRoutes);
+
 module.exports = router;
